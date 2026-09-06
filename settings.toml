@@ -43,6 +43,23 @@ pos = [ 20, 20 ]
 size = [ 460, 480 ]
 # Hotkey (with Ctrl) that reloads profile.json in the running app
 reload_key = "r"
+# Viewport chrome
+title = "pxlreact"
+always_on_top = true
+resizable = true
+decorated = true
+# Backbuffer clear color (RGBA floats 0-1)
+clear_color = [ 0.06, 0.06, 0.07, 1.0 ]
+# Optional TTF/OTF; empty path keeps DearPyGui's default font
+font_path = ""
+font_size = 16
+# Semantic status colors (RGB 0-255): ready / cooling / gates-blocked / primary text / muted / alert
+color_ready = [ 120, 220, 120 ]
+color_cooldown = [ 230, 200, 90 ]
+color_blocked = [ 150, 150, 150 ]
+color_text = [ 230, 230, 230 ]
+color_muted = [ 150, 150, 150 ]
+color_alert = [ 235, 110, 110 ]
 
 [trigger_log]
 # Record the pixel color responsible for each reaction firing; report at exit

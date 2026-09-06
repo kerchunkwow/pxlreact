@@ -1,0 +1,78 @@
+{
+  "healthbar": {
+    "fill_color": [
+      0,
+      243,
+      16
+    ],
+    "y_top": 1149,
+    "y_bottom": 1382,
+    "width": 8
+  },
+  "players": {
+    "1": {
+      "healthbar_x": 609,
+      "unselected": {
+        "x": 474,
+        "y": 1138,
+        "color": [
+          90,
+          85,
+          82
+        ]
+      },
+      "portrait": {
+        "x": 476,
+        "y": 1260
+      }
+    },
+    "2": {
+      "healthbar_x": 949,
+      "unselected": {
+        "x": 814,
+        "y": 1139,
+        "color": [
+          97,
+          92,
+          89
+        ]
+      },
+      "portrait": {
+        "x": 813,
+        "y": 1253
+      }
+    },
+    "3": {
+      "healthbar_x": 1288,
+      "unselected": {
+        "x": 1153,
+        "y": 1138,
+        "color": [
+          90,
+          92,
+          89
+        ]
+      },
+      "portrait": {
+        "x": 1149,
+        "y": 1258
+      }
+    },
+    "4": {
+      "healthbar_x": 1626,
+      "unselected": {
+        "x": 1491,
+        "y": 1139,
+        "color": [
+          90,
+          92,
+          89
+        ]
+      },
+      "portrait": {
+        "x": 1488,
+        "y": 1257
+      }
+    }
+  }
+}

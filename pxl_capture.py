@@ -112,7 +112,7 @@ def make_capturing_factory( capture, width, height ):
             reaction_color = data[ 'reaction_color' ],
             tolerance = data[ 'tolerance' ],
             reaction = data[ 'reaction' ],
-            readiness = build_readiness( data ),
+            readiness = build_readiness( data, app = pixel.app ),
             confirm = data[ 'confirm' ],
             ignore_colors = data[ 'ignore_colors' ],
             name = name,

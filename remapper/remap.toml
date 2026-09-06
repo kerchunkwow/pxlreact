@@ -1,0 +1,27 @@
+# Physical key (left) is replaced by the sent key (right). Injected keys are not remapped again.
+# Key names match pyinterception (get_key_information): letters, "up"/"left"/"right"/"down",
+# "space", "tab", "f3", "`", etc.
+
+# Foreground-title substring; empty = always remap. Set this before using other apps that need WASD.
+target_window = ""
+
+# Swallowed; not forwarded to the game. Do not use esc — DOS games need it.
+quit_key = "f12"
+
+# Optional capture-loop plugin (sibling module in this directory). Empty = remapper only.
+plugin = "mm6"
+
+[binds]
+w = "up"
+a = "left"
+d = "right"
+s = "down"
+f = "a"
+r = "s"
+e = "space"
+space = "x"
+c = "`"
+b = "c"
+"`" = "f3"
+tab = "m"
+x = "r"

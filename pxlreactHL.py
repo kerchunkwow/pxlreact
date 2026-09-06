@@ -54,8 +54,12 @@ class PxlReactApp:
         # Set by the remapper's Ctrl+<reload_key> hotkey; consumed by the main loop between ticks
         self._reload_event = threading.Event()
 
-        # Shared cast lock: a cast-time reaction arms it so the remapper drops keypresses that would
-        # otherwise interrupt the cast; remap actions with a cast_time arm the same lock.
+        # Set by the remapper's F12 hotkey; while set, the poll loop suspends and the remapper drops
+        # to pass-through until any remapped rotation key (in-window) clears it. A second F12 quits.
+        self.pause_event = threading.Event()
+
+        # Shared cast lock: cast-time reactions and remap actions both arm it and both refuse to
+        # fire while it is active, so neither side can interrupt the other.
         self.cast_lock = CastLock()
         self.hub.attach( self.cast_lock )
 
@@ -65,7 +69,8 @@ class PxlReactApp:
                                      self.profile[ 'actions' ],
                                      self.profile[ 'rotations' ],
                                      on_quit = self.exit_application, cast_lock = self.cast_lock,
-                                     hub = self.hub, on_reload = self._reload_event.set )
+                                     hub = self.hub, on_reload = self._reload_event.set,
+                                     pause_event = self.pause_event )
 
         self.tick_interval = self.settings[ 'app' ][ 'tick_interval' ]
 
@@ -76,8 +81,7 @@ class PxlReactApp:
         for name, data in self.profile[ 'reactions' ].items():
             if data[ 'enabled' ]:
                 self.load_reaction( name )
-        self.hub.set_reactions( [ name for name, data in self.profile[ 'reactions' ].items()
-                                  if data[ 'enabled' ] ] )
+        self._publish_reaction_hub()
 
         # Optional in-process status bar (DPG render loop on a daemon thread); fully absent when
         # disabled so headless runs carry no GUI dependency
@@ -101,6 +105,16 @@ class PxlReactApp:
                 if self._reload_event.is_set():
                     self._reload_event.clear()
                     self._reload_profile()
+
+                # Paused (F12): suspend polling and drop any pending confirm streaks so nothing
+                # carries across the gap. The remapper clears pause_event on the next remapped key.
+                if self.pause_event.is_set():
+                    self.hub.set_active( False )
+                    for pxl in self.pixels:
+                        if pxl.reaction is not None:
+                            pxl.reaction.reset()
+                    time.sleep( self.tick_interval )
+                    continue
 
                 # One live gate read per tick; when inactive (wrong window or marker off, e.g. a
                 # loading screen) clear pending streaks so a confirmation can't carry across the
@@ -161,10 +175,16 @@ class PxlReactApp:
         for name, data in profile[ 'reactions' ].items():
             if data[ 'enabled' ]:
                 self.load_reaction( name )
-        self.hub.set_reactions( [ name for name, data in profile[ 'reactions' ].items()
-                                  if data[ 'enabled' ] ] )
+        self._publish_reaction_hub()
 
         print( f"{GREEN}profile reloaded{RESET}" )
+
+    def _publish_reaction_hub( self ):
+        """Register reaction names and live PxlReaction refs on the status hub."""
+        view = [ ( pxl.reaction.name, pxl.reaction )
+                 for pxl in self.pixels if pxl.reaction is not None ]
+        self.hub.set_reactions( [ name for name, _ in view ] )
+        self.hub.set_reaction_view( view )
 
     def exit_application( self ):
         """
@@ -286,6 +306,20 @@ class CooldownReadiness:
     def fired( self ):
         self._last = time.perf_counter()
 
+    def cooldown_remaining( self ):
+        """Seconds until the timed gate reopens (0.0 when ready or never fired)."""
+        if self.cooldown > 0 and self._last >= 0:
+            return max( 0.0, self.cooldown - ( time.perf_counter() - self._last ) )
+        return 0.0
+
+    def cooldown_period( self ):
+        """Configured timed-cooldown length in seconds (0.0 if none)."""
+        return self.cooldown if self.cooldown > 0 else 0.0
+
+    def color_gates( self ):
+        """No color gates; empty list for status-bar glyph iteration."""
+        return []
+
 
 class ColorReadiness:
     """
@@ -306,14 +340,81 @@ class ColorReadiness:
         self.lockout = lockout
         self._last = -1.0
 
-    def ready( self ):
-        if self._last >= 0 and ( time.perf_counter() - self._last ) < self.lockout:
-            return False
+    def color_passes( self ):
+        """Availability pixel check only (ignores post-fire lockout)."""
         observed = get_pixel_color( self.px, self.py )
         return observed is not None and colors_similar( observed, self.color, self.tolerance )
 
+    def ready( self ):
+        if self._last >= 0 and ( time.perf_counter() - self._last ) < self.lockout:
+            return False
+        return self.color_passes()
+
     def fired( self ):
         self._last = time.perf_counter()
+
+    def cooldown_remaining( self ):
+        """Seconds of post-fire lockout remaining (0.0 when unlocked or never fired)."""
+        if self.lockout > 0 and self._last >= 0:
+            return max( 0.0, self.lockout - ( time.perf_counter() - self._last ) )
+        return 0.0
+
+    def cooldown_period( self ):
+        """Color lockout is not a timed cooldown period for peer-settle math."""
+        return 0.0
+
+    def color_gates( self ):
+        """This strategy is itself one color gate for status-bar glyphs."""
+        return [ self ]
+
+
+class ReactionReadiness:
+    """
+    Peer-reaction readiness: this gate passes only while another reaction is on cooldown and enough
+    of that cooldown has already elapsed (the settle window). Used to chain threshold reactions so
+    a sudden drop that crosses both thresholds cannot burn two charges on the same hit.
+
+    Passes when peer.period > 0 and 0 < peer.remaining <= period * (1 - settle_ratio).
+    settle_ratio=0 means any positive remaining; default 0.15 blocks until 15% of the peer CD has
+    drained. Missing or disabled peers never pass.
+    """
+
+    def __init__( self, app, peer_name, settle_ratio = 0.15 ):
+        self.app = app
+        self.peer_name = peer_name
+        self.settle_ratio = settle_ratio
+
+    def _peer( self ):
+        """Resolve the live peer PxlReaction by name; None if disabled or not yet loaded."""
+        for pxl in self.app.pixels:
+            if pxl.reaction is not None and pxl.reaction.name == self.peer_name:
+                return pxl.reaction
+        return None
+
+    def ready( self ):
+        peer = self._peer()
+        if peer is None:
+            return False
+        period = peer.cooldown_period()
+        remaining = peer.cooldown_remaining()
+        if period <= 0 or remaining <= 0:
+            return False
+        return remaining <= period * ( 1.0 - self.settle_ratio )
+
+    def fired( self ):
+        """Observer only; peer fire time is owned by the peer's own readiness."""
+        pass
+
+    def cooldown_remaining( self ):
+        """Not a timed gate of its own; status bar ignores this strategy."""
+        return 0.0
+
+    def cooldown_period( self ):
+        """Peer dependency does not contribute a timed cooldown period."""
+        return 0.0
+
+    def color_gates( self ):
+        return []
 
 
 class CompositeReadiness:
@@ -332,6 +433,25 @@ class CompositeReadiness:
     def fired( self ):
         for s in self.strategies:
             s.fired()
+
+    def cooldown_remaining( self ):
+        """Max remaining among children (0.0 when all are ready / never fired)."""
+        if not self.strategies:
+            return 0.0
+        return max( s.cooldown_remaining() for s in self.strategies )
+
+    def cooldown_period( self ):
+        """Max timed-cooldown period among children (ignores color lockout / peer gates)."""
+        if not self.strategies:
+            return 0.0
+        return max( s.cooldown_period() for s in self.strategies )
+
+    def color_gates( self ):
+        """Flatten color gates from all children for status-bar glyphs."""
+        gates = []
+        for s in self.strategies:
+            gates.extend( s.color_gates() )
+        return gates
 
 
 class PxlReaction:
@@ -371,9 +491,10 @@ class PxlReaction:
             trigger_log (TriggerLog | None): When provided, the color that caused each firing is
                 recorded for the post-session report.
             cast_time (float, optional): Seconds this reaction's action takes to cast. When > 0, the
-                shared cast_lock is armed on firing so remapped keypresses are dropped and cannot
-                interrupt the cast. Default 0.0 (no cast protection).
-            cast_lock (CastLock | None): shared cast gate armed when a cast_time reaction fires.
+                shared cast_lock is armed on firing so neither remapped keypresses nor other
+                reactions can interrupt the cast. Default 0.0 (no cast protection).
+            cast_lock (CastLock | None): shared cast gate; firing is suppressed while active, and
+                armed when a cast_time reaction fires.
         """
         self.pxl = pxl
         self.type = reaction_type
@@ -391,6 +512,18 @@ class PxlReaction:
         # perf_counter timestamp marking the start of an uninterrupted firing-condition streak; None
         # while the pixel reads as safe. A trigger requires the streak to last at least `confirm`.
         self._pending_since = None
+
+    def cooldown_remaining( self ):
+        """Seconds until readiness reopens (0.0 when ready); for live status-bar display."""
+        return self.readiness.cooldown_remaining()
+
+    def cooldown_period( self ):
+        """Effective timed-cooldown length for peer-settle readiness (0.0 if none)."""
+        return self.readiness.cooldown_period()
+
+    def color_gates( self ):
+        """ColorReadiness strategies contributing status-bar glyphs."""
+        return self.readiness.color_gates()
 
     def _should_fire( self ):
         """
@@ -413,6 +546,9 @@ class PxlReaction:
         firing condition has held continuously for at least `confirm` seconds, so brief transients
         (e.g. shocked/poisoned tints) that clear within a few frames are ignored.
 
+        While the shared cast lock is active, firing is deferred (the confirm streak is kept) so the
+        reaction can fire on a later tick after the cast ends.
+
         The caller (poll loop) must only invoke this while the app context is active; reset() drops
         a pending streak when the context goes inactive.
         """
@@ -425,6 +561,8 @@ class PxlReaction:
             self._pending_since = now
 
         if self.readiness.ready() and ( now - self._pending_since ) >= self.confirm:
+            if self.cast_lock is not None and self.cast_lock.blocked():
+                return
             self.trigger()
             self._pending_since = None
 
@@ -434,42 +572,53 @@ class PxlReaction:
 
     def trigger( self ):
         """
-        Call the reaction function and notify the readiness strategy that it fired. The triggering
-        pixel color is recorded to the trigger log (when one is attached) before firing.
+        Arm the cast lock (if any), call the reaction function, and notify readiness that it fired.
+        The triggering pixel color is recorded to the trigger log (when one is attached) before
+        firing. Cast lock is armed before the key so neither a remapped press nor another reaction
+        can slip in between.
         """
         if self.trigger_log is not None:
             self.trigger_log.record( self.name, self.pxl.rgb )
-        # Arm the cast lock before sending the key so an in-flight remap press can't slip in and
-        # interrupt the cast between firing and the lock being set.
-        if self.cast_time > 0 and self.cast_lock is not None:
-            self.cast_lock.arm( self.cast_time )
+        if self.cast_lock is not None:
+            self.cast_lock.begin( self.cast_time )
         self.reaction()
         self.readiness.fired()
 
 
-def _build_one_readiness( spec ):
+def _build_one_readiness( spec, app = None ):
     """Build a single readiness strategy from one normalized `ready` spec dict."""
-    if spec[ 'type' ] == 'color':
+    rtype = spec[ 'type' ]
+    if rtype == 'color':
         return ColorReadiness( spec[ 'px' ], spec[ 'py' ], spec[ 'color' ],
                                spec[ 'tolerance' ], spec[ 'lockout' ] )
+    if rtype == 'reaction':
+        return ReactionReadiness( app, spec[ 'reaction' ], spec[ 'settle_ratio' ] )
     return CooldownReadiness( spec[ 'cooldown' ] )
 
 
-def build_readiness( data ):
+def build_readiness( data, app = None ):
     """
     Construct a reaction's readiness strategy from its registry entry (normalized by pxl_config).
 
-    `ready` is a list of spec dicts that must ALL be ready (AND, via CompositeReadiness): each is
-    { 'type': 'color', 'px', 'py', 'color', 'tolerance', 'lockout' } for pixel-color readiness, or
-    { 'type': 'cooldown', 'cooldown' } for time readiness. When `ready` is None the `cooldown`
-    shorthand is used (time readiness).
+    Top-level `cooldown` (when > 0) always contributes a CooldownReadiness gate. `ready` is an
+    optional list of additional spec dicts that must ALSO be ready (AND, via CompositeReadiness):
+    each is { 'type': 'color', ... } for pixel-color readiness, { 'type': 'cooldown', 'cooldown' }
+    for an extra time gate, or { 'type': 'reaction', 'reaction', 'settle_ratio' } to gate on
+    another reaction's cooldown settle window. When `ready` is None or empty, only the top-level
+    cooldown gate is used. `app` is required when any ready spec is type 'reaction'.
     """
+    strategies = []
+    cd = data.get( 'cooldown' )
+    if cd is not None and cd > 0:
+        strategies.append( CooldownReadiness( cd ) )
     specs = data[ 'ready' ]
-    if specs is None:
-        return CooldownReadiness( data[ 'cooldown' ] )
-    if len( specs ) == 1:
-        return _build_one_readiness( specs[ 0 ] )
-    return CompositeReadiness( [ _build_one_readiness( s ) for s in specs ] )
+    if specs:
+        strategies.extend( _build_one_readiness( s, app ) for s in specs )
+    if not strategies:
+        return CooldownReadiness( cd if cd is not None else 0.0 )
+    if len( strategies ) == 1:
+        return strategies[ 0 ]
+    return CompositeReadiness( strategies )
 
 
 def build_reaction( pixel, data, name, trigger_log, cast_lock ):
@@ -484,7 +633,7 @@ def build_reaction( pixel, data, name, trigger_log, cast_lock ):
         reaction_color = data[ 'reaction_color' ],
         tolerance = data[ 'tolerance' ],
         reaction = data[ 'reaction' ],
-        readiness = build_readiness( data ),
+        readiness = build_readiness( data, app = pixel.app ),
         confirm = data[ 'confirm' ],
         ignore_colors = data[ 'ignore_colors' ],
         name = name,

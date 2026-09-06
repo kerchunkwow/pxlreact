@@ -97,7 +97,9 @@ Configuration is split across two files; nothing gameplay-related is defined in 
   check that does not set its own
 - `[devices]` — keyboard/mouse hardware IDs for Interception device matching
 - `[intercept]` / `[remapper]` — injection pool size and humanized press/hold delay ranges
-- `[gui]` — status bar enable, fps, `color_check_hz`, viewport position/size, and the reload key
+- `[gui]` — status bar enable, fps, `color_check_hz`, viewport position/size, reload key, plus
+  appearance knobs (`title`, `decorated`, `always_on_top`, `resizable`, `clear_color`, optional
+  `font_path`/`font_size`, and semantic `color_*` RGB triples)
 - `[trigger_log]` — record the pixel color responsible for each reaction firing; persists across
   sessions and prints a collapsed per-color report at exit (high-count benign tints are obvious
   `ignore_colors` candidates)
@@ -109,8 +111,11 @@ Configuration is split across two files; nothing gameplay-related is defined in 
   tolerance, default 0 = exact) for the app to act; guards against loading screens and overlays
 - **reactions** — monitored pixels: coordinates, firing condition (`react_if_not_color` /
   `react_if_color` with per-reaction tolerance), `confirm` debounce, readiness (cooldown and/or
-  indicator-pixel color checks, ANDed), `ignore_colors` for benign tints, the key to `press`, and
-  an optional `cast_time` that arms the shared cast lock
+  indicator-pixel color checks and/or another reaction's cooldown settle window, ANDed),
+  `ignore_colors` for benign tints, the key to `press`, and an optional `cast_time` that arms the
+  shared cast lock. A ready check `{ "type": "reaction", "reaction": "peer_name", "settle_ratio": 0.15 }`
+  passes only while the peer is on cooldown and at least `settle_ratio` of its timed cooldown has
+  already elapsed (default 0.15) — used to chain thresholds without burning two charges on one hit
 - **actions** — the building blocks of rotations: key (or mouse button `left`/`right`/`middle`),
   cooldown, cast time, and pixel color checks that must all pass
 - **rotations** — each rotation binds a physical source `key` and an ordered `actions` list; when

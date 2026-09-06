@@ -15,55 +15,45 @@
     ]
   },
   "reactions": {
-    "HP1": {
-      "enabled": false,
-      "x": 83,
-      "y": 1223,
-      "type": "react_if_not_color",
-      "color": [
-        74,
-        114,
-        126
-      ],
-      "tolerance": 4000,
-      "confirm": 0.1,
-      "cooldown": 5,
-      "ignore_colors": [],
-      "press": "F"
-    },
-    "MP1": {
+    "mana": {
       "enabled": true,
-      "x": 2415,
-      "y": 1356,
+      "x": 2395,
+      "y": 1328,
       "type": "react_if_not_color",
       "color": [
-        14,
-        50,
-        105
+        25,
+        74,
+        137
       ],
-      "tolerance": 4000,
+      "tolerance": 10000,
       "confirm": 0.1,
       "cooldown": 3,
       "press": "2",
       "ignore_colors": []
     },
-    "CV1": {
-      "enabled": false,
-      "x": 166,
-      "y": 1235,
+    "es_hi": {
+      "enabled": true,
+      "x": 261,
+      "y": 1212,
       "type": "react_if_not_color",
       "color": [
-        136,
-        192,
-        204
+        171,
+        207,
+        216
       ],
-      "tolerance": 4000,
+      "tolerance": 8000,
       "confirm": 0.1,
+      "cooldown": 38.5,
+      "ignore_colors": [
+        [
+          186,
+          140,
+          207
+        ]
+      ],
+      "press": "T",
+      "cast_time": 0.3100000023841858,
       "ready": [
-        {
-          "type": "cooldown",
-          "cooldown": 6
-        },
         {
           "type": "color",
           "px": 2149,
@@ -75,30 +65,21 @@
           ],
           "tolerance": 4000
         }
-      ],
-      "ignore_colors": [
-        [
-          186,
-          140,
-          207
-        ]
-      ],
-      "cast_time": 0.4,
-      "press": "T"
+      ]
     },
-    "conv": {
+    "es_low": {
       "enabled": true,
       "x": 289,
-      "y": 1254,
+      "y": 1257,
       "type": "react_if_not_color",
       "color": [
-        103,
-        193,
-        239
+        92,
+        176,
+        225
       ],
-      "tolerance": 4000,
+      "tolerance": 10000,
       "confirm": 0.1,
-      "cooldown": 0.3100000023841858,
+      "cooldown": 38.5,
       "ignore_colors": [
         [
           186,
@@ -107,12 +88,8 @@
         ]
       ],
       "press": "T",
-      "cast_time": 0.4000000059604645,
+      "cast_time": 0.3100000023841858,
       "ready": [
-        {
-          "type": "cooldown",
-          "cooldown": 6.0
-        },
         {
           "type": "color",
           "px": 2149,
@@ -148,7 +125,7 @@
     "ruzhan's trap": {
       "key": "q",
       "cooldown": 4.04,
-      "cast_time": 0.28,
+      "cast_time": 0.4300000071525574,
       "color_check": [
         {
           "px": 1938,
@@ -182,7 +159,7 @@
     "deception1": {
       "key": "left",
       "cooldown": 1.2,
-      "cast_time": 0.28,
+      "cast_time": 0.5600000023841858,
       "color_check": [
         {
           "px": 2082,
@@ -199,7 +176,7 @@
     "deception2": {
       "key": "left",
       "cooldown": 1.2,
-      "cast_time": 0.28,
+      "cast_time": 0.5600000023841858,
       "color_check": [
         {
           "px": 2082,
@@ -216,7 +193,7 @@
     "brutality": {
       "key": "right",
       "cooldown": 0,
-      "cast_time": 0.28,
+      "cast_time": 0.5600000023841858,
       "color_check": [
         {
           "px": 2217,
@@ -281,6 +258,23 @@
           "tolerance": 4000
         }
       ]
+    },
+    "reaver_rage": {
+      "key": "f",
+      "cooldown": 0.0,
+      "cast_time": 0.7099999785423279,
+      "color_check": [
+        {
+          "px": 2196,
+          "py": 1378,
+          "color": [
+            197,
+            197,
+            197
+          ],
+          "tolerance": 3000
+        }
+      ]
     }
   },
   "rotations": {
@@ -289,6 +283,7 @@
       "actions": [
         "unholy might",
         "ruzhan's trap",
+        "reaver_rage",
         "deception1",
         "deception2",
         "brutality"
@@ -299,6 +294,7 @@
       "actions": [
         "despair1",
         "pain offering",
+        "reaver_rage",
         "despair2"
       ]
     }

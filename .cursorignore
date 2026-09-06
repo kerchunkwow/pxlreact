@@ -2,6 +2,7 @@
 
 media/
 deprecated/
+pxlreact1_archive/
 
 *.dll
 *.lib

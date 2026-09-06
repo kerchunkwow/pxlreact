@@ -171,7 +171,7 @@ class PxlRemapper:
     """
 
     def __init__( self, wincheck, actions, rotations, on_quit = None, cast_lock = None,
-                  hub = None, on_reload = None ):
+                  hub = None, on_reload = None, pause_event = None ):
         """
         Args:
             wincheck (PxlWinCheck): gating; remaps apply only while wincheck.check() returns True.
@@ -179,16 +179,20 @@ class PxlRemapper:
             rotations (dict): ROTATIONS config { rotation_name: { key, actions: [ action_name ] } };
                 each rotation's `key` is the physical source key it captures.
             on_quit (callable | None): invoked when the F12/ESC quit hotkey is pressed.
-            cast_lock (CastLock | None): shared cast gate; while active, remap presses are dropped so
-                they cannot interrupt a cast. Reactions arm the same lock, so a cast-time reaction is
-                protected from remapped keypresses. A private lock is created if none is supplied.
+            cast_lock (CastLock | None): shared cast gate; while active, remap presses are dropped
+                and reactions also refuse to fire, so neither side interrupts a cast. A private lock
+                is created if none is supplied.
             hub (StatusHub | None): reporting funnel for runtime state (status bar). A private hub
                 is created if none is supplied.
             on_reload (callable | None): invoked when the Ctrl+<reload_key> hotkey is pressed.
+            pause_event (threading.Event | None): shared pause gate. F12 sets it (entering pause);
+                while set, remapped keys drop to raw pass-through, F11 clears it (resuming), and a
+                second F12 quits. A private Event is created if none given.
         """
         self.wincheck = wincheck
         self.on_quit = on_quit
         self.on_reload = on_reload
+        self.pause_event = pause_event if pause_event is not None else threading.Event()
 
         if hub is None:
             from pxl_status import StatusHub
@@ -204,8 +208,8 @@ class PxlRemapper:
         self.MIN_HOLD = settings[ 'remapper' ][ 'min_hold' ]
         self.MAX_HOLD = settings[ 'remapper' ][ 'max_hold' ]
 
-        # Shared cast lock: while active(), a cast is in progress and remap presses are dropped so
-        # the cast is not interrupted (armed by remap actions with cast_time and by reactions).
+        # Shared cast lock: while blocked, remap presses are dropped and reactions defer firing
+        # (armed by remap actions with cast_time and by cast-time reactions).
         self.cast_lock = cast_lock if cast_lock is not None else CastLock()
 
         self.ctx = pyint.Interception()
@@ -230,6 +234,7 @@ class PxlRemapper:
         # Command hotkey scan codes; ctrl shares scan 0x1D for both left/right (E0 distinguishes)
         self._sc_esc = get_key_information( 'esc' ).scan_code
         self._sc_f12 = get_key_information( 'f12' ).scan_code
+        self._sc_f11 = get_key_information( 'f11' ).scan_code
         self._sc_p = get_key_information( 'p' ).scan_code
         self._sc_reload = get_key_information( settings[ 'gui' ][ 'reload_key' ] ).scan_code
         self._sc_ctrl = get_key_information( 'ctrlleft' ).scan_code
@@ -342,12 +347,18 @@ class PxlRemapper:
 
                 self.down[ scan_code ] = True
 
+                if self.pause_event.is_set():
+                    # Paused: remapped keys behave like the raw key and never fire; resume is
+                    # F11-only (handled in _handle_command).
+                    self.ctx.send( device, stroke )
+                    continue
+
                 if not self.wincheck.check():
                     # Outside the target app: behave like the real key (silently)
                     self.ctx.send( device, stroke )
                     continue
 
-                if self.cast_lock.active():
+                if self.cast_lock.blocked():
                     # A cast is in progress; drop this press so the cast is not interrupted and
                     # flash the status bar frame.
                     # FUTURE: to queue instead of dropping, buffer the rotation here and flush at
@@ -380,12 +391,27 @@ class PxlRemapper:
             self.ctx.send( device, stroke )
             return True
 
-        # F12 / ESC quit; swallow both edges so the keys never reach the app
+        # F12 pause/quit toggle: first press pauses; a second press while paused quits. Resume from
+        # pause is F11-only (below). Both edges are swallowed.
         if code == self._sc_f12:
             if not is_up:
-                print( f"⏹️ {RED}quit hotkey{RESET}" )
-                if self.on_quit is not None:
-                    self.on_quit()
+                if self.pause_event.is_set():
+                    print( f"⏹️ {RED}quit hotkey{RESET}" )
+                    if self.on_quit is not None:
+                        self.on_quit()
+                else:
+                    self.pause_event.set()
+                    self.hub.set_paused( True )
+                    print( f"⏸️ {YELLOW}paused{RESET} - F11 resumes, F12 quits" )
+            return True
+
+        # F11 resume: only meaningful while paused (clears the pause gate); a no-op otherwise.
+        # Swallowed in both states so it never reaches the game.
+        if code == self._sc_f11:
+            if not is_up and self.pause_event.is_set():
+                self.pause_event.clear()
+                self.hub.set_paused( False )
+                print( f"▶️ {GREEN}resumed{RESET}" )
             return True
 
         # Ctrl+P -> toggle the pixel monitor (reports the pixel under the cursor when its color
@@ -445,18 +471,17 @@ class PxlRemapper:
     def _fire( self, rotation ):
         """
         Resolve the rotation and send the chosen action's key (if any). An action with a cast_time
-        arms the global cast lock so subsequent presses are dropped until the cast completes. The
-        fired ability is published to the hub; a press with nothing ready is silent (the status
-        bar's live rotation rows already show why).
+        arms the global cast lock before the key is sent so neither remapped presses nor reactions
+        can interrupt the cast. The fired ability is published to the hub; a press with nothing
+        ready is silent (the status bar's live rotation rows already show why).
         """
         action = rotation.resolve()
         if action is None:
             return
 
+        # Arm before send so a concurrent reaction poll cannot slip a key in between.
+        self.cast_lock.begin( action.cast_time )
         self._press_substitute( action.key )
         action.fire()
-
-        if action.cast_time > 0:
-            self.cast_lock.arm( action.cast_time )
 
         self.hub.record_ability( action.name )

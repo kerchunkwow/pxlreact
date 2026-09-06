@@ -83,10 +83,45 @@ def _load_settings( path ):
     gui.setdefault( "pos", [ 20, 20 ] )
     gui.setdefault( "size", [ 460, 480 ] )
     gui.setdefault( "reload_key", "r" )
+    gui.setdefault( "title", "pxlreact" )
+    gui.setdefault( "always_on_top", True )
+    gui.setdefault( "resizable", True )
+    gui.setdefault( "decorated", True )
+    gui.setdefault( "clear_color", [ 0.06, 0.06, 0.07, 1.0 ] )
+    gui.setdefault( "font_path", "" )
+    gui.setdefault( "font_size", 16 )
+    gui.setdefault( "color_ready", [ 120, 220, 120 ] )
+    gui.setdefault( "color_cooldown", [ 230, 200, 90 ] )
+    gui.setdefault( "color_blocked", [ 150, 150, 150 ] )
+    gui.setdefault( "color_text", [ 230, 230, 230 ] )
+    gui.setdefault( "color_muted", [ 150, 150, 150 ] )
+    gui.setdefault( "color_alert", [ 235, 110, 110 ] )
     if not ( 0 < gui[ "fps" ] <= 60 ) or not ( 0 < gui[ "color_check_hz" ] <= gui[ "fps" ] ):
         _fail( f"{path}: gui.fps / gui.color_check_hz out of range" )
+    if not ( isinstance( gui[ "title" ], str ) and gui[ "title" ] ):
+        _fail( f"{path}: gui.title must be a non-empty string" )
+    if not isinstance( gui[ "font_path" ], str ):
+        _fail( f"{path}: gui.font_path must be a string" )
+    if not ( isinstance( gui[ "font_size" ], int ) and 8 <= gui[ "font_size" ] <= 48 ):
+        _fail( f"{path}: gui.font_size must be an integer in 8..48" )
+    clear = gui[ "clear_color" ]
+    if not ( isinstance( clear, list ) and len( clear ) == 4
+             and all( isinstance( c, ( int, float ) ) and 0 <= c <= 1 for c in clear ) ):
+        _fail( f"{path}: gui.clear_color must be four floats in 0..1" )
+    gui[ "clear_color" ] = [ float( c ) for c in clear ]
+    for key in ( "color_ready", "color_cooldown", "color_blocked", "color_text",
+                 "color_muted", "color_alert" ):
+        gui[ key ] = _gui_rgb( gui[ key ], f"{path}: gui.{key}" )
 
     return raw
+
+
+def _gui_rgb( value, owner ):
+    """Validate an RGB triple (0-255 ints) for gui semantic colors; return as a list."""
+    if not ( isinstance( value, ( list, tuple ) ) and len( value ) == 3
+             and all( isinstance( c, int ) and 0 <= c <= 255 for c in value ) ):
+        _fail( f"invalid RGB for {owner}: {value}" )
+    return list( value )
 
 
 def load_profile( path = PROFILE_PATH, default_tolerance = None ):
@@ -119,6 +154,8 @@ def load_profile( path = PROFILE_PATH, default_tolerance = None ):
         "rotations": { name: _normalize_rotation( name, data )
                        for name, data in raw[ "rotations" ].items() },
     }
+
+    _validate_reaction_peer_refs( profile[ "reactions" ] )
 
     # Referential integrity: rotations name real actions; source keys are unique across rotations
     keys_seen = {}
@@ -219,7 +256,67 @@ def _normalize_ready_spec( spec, owner, default_tolerance ):
         if not ( 0 < cd < 180 ):
             _fail( f"unreasonable ready cooldown for {owner}: {cd}" )
         return { "type": "cooldown", "cooldown": cd }
+    if rtype == "reaction":
+        peer = spec.get( "reaction" )
+        if not ( isinstance( peer, str ) and peer ):
+            _fail( f"{owner} ready type 'reaction' requires a non-empty 'reaction' peer name" )
+        settle = spec.get( "settle_ratio", 0.15 )
+        if not isinstance( settle, ( int, float ) ) or not ( 0 <= settle < 1 ):
+            _fail( f"unreasonable settle_ratio for {owner}: {settle}" )
+        return { "type": "reaction", "reaction": peer, "settle_ratio": float( settle ) }
     _fail( f"unknown ready type for {owner}: {rtype}" )
+
+
+def _reaction_has_timed_cooldown( data ):
+    """True if the reaction has a positive top-level cooldown or a ready[] cooldown entry."""
+    cd = data.get( "cooldown" )
+    if cd is not None and cd > 0:
+        return True
+    for spec in ( data.get( "ready" ) or [] ):
+        if spec[ "type" ] == "cooldown" and spec[ "cooldown" ] > 0:
+            return True
+    return False
+
+
+def _validate_reaction_peer_refs( reactions ):
+    """
+    Validate ready[] type 'reaction' cross-references: peer exists, is not self, has a timed
+    cooldown, and the dependency graph has no cycles.
+    """
+    edges = {}
+    for name, data in reactions.items():
+        peers = []
+        for spec in ( data.get( "ready" ) or [] ):
+            if spec[ "type" ] != "reaction":
+                continue
+            peer = spec[ "reaction" ]
+            if peer not in reactions:
+                _fail( f"reaction '{name}' ready peer '{peer}' is not a defined reaction" )
+            if peer == name:
+                _fail( f"reaction '{name}' cannot depend on itself" )
+            if not _reaction_has_timed_cooldown( reactions[ peer ] ):
+                _fail( f"reaction '{name}' ready peer '{peer}' has no timed cooldown" )
+            peers.append( peer )
+        if peers:
+            edges[ name ] = peers
+
+    # DFS cycle detection over the peer-dependency graph
+    visiting = set()
+    visited = set()
+
+    def visit( node ):
+        if node in visited:
+            return
+        if node in visiting:
+            _fail( f"reaction ready peer dependency cycle involving '{node}'" )
+        visiting.add( node )
+        for nxt in edges.get( node, [] ):
+            visit( nxt )
+        visiting.remove( node )
+        visited.add( node )
+
+    for name in edges:
+        visit( name )
 
 
 def _normalize_reaction( name, data, default_tolerance ):
@@ -241,13 +338,17 @@ def _normalize_reaction( name, data, default_tolerance ):
     if not ( 0 <= cast_time < 10 ):
         _fail( f"unreasonable cast_time for {owner}: {cast_time}" )
 
+    cooldown = data.get( "cooldown" )
+    if cooldown is not None and not ( 0 <= cooldown < 180 ):  # avoid ms/s confusion
+        _fail( f"unreasonable cooldown for {owner}: {cooldown}" )
+
     ready = data.get( "ready" )
     if ready is not None:
         specs = ready if isinstance( ready, list ) else [ ready ]
         ready = [ _normalize_ready_spec( s, owner, default_tolerance ) for s in specs ]
     else:
-        cooldown = data.get( "cooldown", 0 )
-        if not ( 0 < cooldown < 180 ):  # avoid ms/s confusion (never > 3 minutes)
+        # Top-level cooldown is required when there are no ready[] gates
+        if cooldown is None or not ( 0 < cooldown < 180 ):
             _fail( f"unreasonable cooldown for {owner}: {cooldown}" )
 
     ignore = data.get( "ignore_colors", [] )
@@ -262,7 +363,7 @@ def _normalize_reaction( name, data, default_tolerance ):
         "color": _color_tuple( data.get( "color" ), owner ),
         "tolerance": _check_tolerance( data.get( "tolerance", default_tolerance ), owner ),
         "confirm": confirm,
-        "cooldown": data.get( "cooldown" ),
+        "cooldown": cooldown,
         "ready": ready,
         "cast_time": cast_time,
         "ignore_colors": [ _color_tuple( c, owner ) for c in ignore ],

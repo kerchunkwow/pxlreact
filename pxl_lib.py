@@ -143,10 +143,11 @@ class CastLock:
     """
     Shared "a cast is in progress" gate, coordinating the reaction system and the keyboard remapper.
 
-    When armed for a duration, `active()` returns True until it elapses. The remapper drops injected
-    remap presses while active so they cannot interrupt a cast; reactions (and remap actions with a
-    cast_time) arm it when they fire. Thread-safe: armed from the reaction poll thread and read from
-    the remapper thread. Arming never shortens an already-longer active cast.
+    When armed for a duration, `active()` returns True until it elapses. Both the remapper and the
+    reaction poll loop refuse to fire while active, so a cast-time action cannot interrupt a
+    cast-time reaction and vice versa. Either side arms the lock via `begin(cast_time)` immediately
+    before sending its key. Thread-safe: armed and read from the reaction poll thread and the
+    remapper thread. Arming never shortens an already-longer active cast.
     """
 
     def __init__( self ):
@@ -157,9 +158,18 @@ class CastLock:
         with self._lock:
             self._until = max( self._until, time.perf_counter() + duration )
 
+    def begin( self, duration ):
+        """Arm the lock when `duration` > 0. Call immediately before sending input."""
+        if duration > 0:
+            self.arm( duration )
+
     def active( self ):
         with self._lock:
             return time.perf_counter() < self._until
+
+    def blocked( self ):
+        """True while a cast is in progress (same as active(); named for fire-path call sites)."""
+        return self.active()
 
 
 def matches_any( color, palette, tolerance ):

@@ -5,3 +5,4 @@ __pycache__/
 .pxlenv
 .vscode
 *.log
+/polled_pixel

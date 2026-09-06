@@ -1,0 +1,55 @@
+[
+  {
+    "bind": "b",
+    "caster": "1",
+    "book": "c",
+    "school": [
+      1613,
+      505
+    ],
+    "spell": [
+      1399,
+      171
+    ]
+  },
+  {
+    "bind": "w",
+    "caster": "2",
+    "book": "c",
+    "school": [
+      1619,
+      196
+    ],
+    "spell": [
+      1020,
+      170
+    ]
+  },
+  {
+    "bind": "l",
+    "caster": "3",
+    "book": "c",
+    "school": [
+      1614,
+      87
+    ],
+    "spell": [
+      1017,
+      172
+    ]
+  },
+  {
+    "bind": "h",
+    "caster": "1",
+    "book": "c",
+    "school": [
+      1634,
+      720
+    ],
+    "spell": [
+      1407,
+      184
+    ],
+    "heal": true
+  }
+]

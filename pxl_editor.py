@@ -219,7 +219,8 @@ class ProfileEditor:
             dpg.add_input_float( label = "cooldown", default_value = d.get( 'cooldown' ) or 0.0, width = 110,
                                  format = "%.2f", callback = self._cb_set, user_data = ( d, 'cooldown' ) )
 
-        dpg.add_text( "ready checks (all must pass; empty list = cooldown only)", parent = p, color = GREY_C )
+        dpg.add_text( "ready checks (ANDed with top-level cooldown; empty = cooldown only)",
+                      parent = p, color = GREY_C )
         dpg.add_group( tag = 'rx_ready_rows', parent = p )
         with dpg.group( horizontal = True, parent = p ):
             dpg.add_button( label = "Add cooldown check",
@@ -228,6 +229,8 @@ class ProfileEditor:
                             callback = lambda: self._add_ready(
                                 { "type": "color", "px": 0, "py": 0, "color": [ 255, 0, 255 ],
                                   "tolerance": 4000 } ) )
+            dpg.add_button( label = "Add reaction check",
+                            callback = lambda: self._add_reaction_ready() )
         self._build_ready_rows()
 
         dpg.add_text( "ignore colors (benign off-colors that must not trigger)", parent = p, color = GREY_C )
@@ -235,6 +238,18 @@ class ProfileEditor:
         dpg.add_button( label = "Add ignore color", parent = p,
                         callback = lambda: self._add_ignore() )
         self._build_ignore_rows()
+
+    def _peer_reaction_names( self ):
+        """Other reaction names available as peer ready-check targets (excludes the selected one)."""
+        return [ n for n in self._reaction_names() if n != self.sel_reaction ]
+
+    def _add_reaction_ready( self ):
+        peers = self._peer_reaction_names()
+        self._add_ready( {
+            "type": "reaction",
+            "reaction": peers[ 0 ] if peers else "",
+            "settle_ratio": 0.15,
+        } )
 
     def _add_ready( self, spec ):
         self.profile[ 'reactions' ][ self.sel_reaction ][ 'ready' ].append( spec )
@@ -248,14 +263,31 @@ class ProfileEditor:
     def _build_ready_rows( self ):
         dpg.delete_item( 'rx_ready_rows', children_only = True )
         specs = self.profile[ 'reactions' ][ self.sel_reaction ][ 'ready' ]
+        peers = self._peer_reaction_names()
         for i, spec in enumerate( specs ):
             with dpg.group( horizontal = True, parent = 'rx_ready_rows' ):
                 dpg.add_button( label = "X", callback = self._del_ready, user_data = i )
-                if spec.get( 'type', 'cooldown' ) == 'cooldown':
+                rtype = spec.get( 'type', 'cooldown' )
+                if rtype == 'cooldown':
                     dpg.add_text( "cooldown", color = GREY_C )
                     dpg.add_input_float( default_value = spec.get( 'cooldown', 5 ), width = 100,
                                          format = "%.2f", callback = self._cb_set,
                                          user_data = ( spec, 'cooldown' ) )
+                elif rtype == 'reaction':
+                    dpg.add_text( "reaction", color = GREY_C )
+                    peer = spec.get( 'reaction', '' )
+                    items = list( peers )
+                    if peer and peer not in items:
+                        items.append( peer )
+                    default_peer = peer if peer in items else ( items[ 0 ] if items else "" )
+                    if default_peer and spec.get( 'reaction' ) != default_peer:
+                        spec[ 'reaction' ] = default_peer
+                    dpg.add_combo( items, default_value = default_peer, width = 140,
+                                   callback = self._cb_set, user_data = ( spec, 'reaction' ) )
+                    dpg.add_input_float( label = "settle", default_value = spec.get( 'settle_ratio', 0.15 ),
+                                         width = 90, format = "%.2f", callback = self._cb_set,
+                                         user_data = ( spec, 'settle_ratio' ) )
+                    dpg.add_text( "of peer CD", color = GREY_C )
                 else:
                     dpg.add_text( "color", color = GREY_C )
                     dpg.add_input_int( default_value = spec.get( 'px', 0 ), width = 90,

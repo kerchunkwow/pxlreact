@@ -1,0 +1,17 @@
+# CTRL+ALT+<define_key> starts and finishes bookcast recording.
+define_ctrl = true
+define_alt = true
+define_key = "b"
+
+# SSD tolerance for the unselected-portrait color check; omit to use settings.toml color.default_tolerance.
+# unselected_tolerance = 4000
+
+# Healing bookcasts abort when every player is at or above this remaining-HP percent.
+heal_skip_pct = 99
+
+# Milliseconds between bookcast playback steps. Tune down until casts start failing.
+[delays_ms]
+after_key = 50
+after_move = 40
+click_hold = 40
+double_click = 50
