@@ -1,5 +1,5 @@
 """
-Throwaway: capture the MM6 (or DOSBox) foreground window identity for remapper gating.
+Throwaway: capture the MM (or DOSBox) foreground window identity for remapper gating.
 
 Click once on the game window. Writes remapper/window.json (title substring + exe basename)
 and exits. Stop remapper first so this process sees the click.
@@ -44,7 +44,7 @@ def _wait_release( vk ):
 
 
 def _title_contains( title ):
-    """Stable substring: DOSBox 'Program: …' or a known MM6 needle; else the full title."""
+    """Stable substring: DOSBox 'Program: …' or a known MM needle; else the full title."""
     if not title:
         return ""
     m = re.search( r"Program:\s*\S+", title, re.I )
@@ -58,7 +58,7 @@ def _title_contains( title ):
 
 
 def main():
-    print( f"ℹ️ Focus MM6 and {CYAN}click once{RESET} on the game window." )
+    print( f"ℹ️ Focus MM and {CYAN}click once{RESET} on the game window." )
     print( f"ℹ️ Esc cancels. Writing to {CYAN}{OUT_PATH}{RESET}." )
 
     if _down( VK_LBUTTON ) and not _wait_release( VK_LBUTTON ):

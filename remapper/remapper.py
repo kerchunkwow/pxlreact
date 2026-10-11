@@ -6,7 +6,7 @@ scan codes (hold-through, including auto-repeat), and sends the rewritten stroke
 same capture context so they are not recaptured. That is what makes circular binds such as
 f -> a vs a -> left produce the destination key rather than a chained remap.
 
-Optional `plugin` in the remap TOML loads a sibling module (e.g. mm6) into this same capture
+Optional `plugin` in the remap TOML loads a sibling module (e.g. mm) into this same capture
 loop so game-specific hotkeys can share the Interception context. Optional `[sequences]` maps
 a key to a one-shot tap list (injected keys are not remapped or re-sequenced).
 
@@ -14,10 +14,10 @@ Ctrl+Alt+M records a click sequence: left/right clicks are stored with cursor po
 Ctrl+Alt+M waits for a bind key, and Ctrl+that key replays move+click via Interception. Saved next
 to the remap TOML as click_sequences.json. Ctrl+Alt+C prints the pixel under the cursor
 as a truecolor chip plus the hue name and hex in that color.
-Ctrl+wheel (no Alt) repeats the wheel tick `ctrl_wheel_repeat` times so MM6 fly climbs/descends faster.
-Alt+wheel (no Ctrl) taps the keys in [alt_wheel] (MM6 look: wheel up = PgDn, wheel down = Del).
+Ctrl+wheel (no Alt) repeats the wheel tick `ctrl_wheel_repeat` times so MM fly climbs/descends faster.
+Alt+wheel (no Ctrl) taps the keys in [alt_wheel] (MM look: wheel up = PgDn, wheel down = Del).
 Each notch is repeated `repeat` times, spaced by `delay_ms`, and the wheel tick is not forwarded.
-Optional [strafe] toggles Left Ctrl around named keys only (MM6: Z on, A/D become Ctrl+Left/Right)
+Optional [strafe] toggles Left Ctrl around named keys only (MM: Z on, A/D become Ctrl+Left/Right)
 and lifts that Ctrl around every other key.
 
 Usage (from the repo root, venv active):

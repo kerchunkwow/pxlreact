@@ -1,18 +1,18 @@
 """
-Standalone MM6 recovery monitor (busy timer).
+Standalone MM recovery monitor (busy timer).
 
-Polls each party member's readiness bubble from remapper/mm6/mm6_status.json. A cycle is the
+Polls each party member's readiness bubble from remapper/mm/mm_status.json. A cycle is the
 time the pixel matches the stored busy (gray) color until it does not. Prints who flipped and
 the duration in tenths of a millisecond, plus a running min/mean/max for that player.
 
 Not imported by remapper or bookcast. Absent unless you run this file.
 
 Usage (repo root, venv; can run alongside remapper):
-    .pxlenv\\Scripts\\python.exe remapper\\mm6\\util\\busy_timer.py
+    .pxlenv\\Scripts\\python.exe remapper\\mm\\util\\busy_timer.py
 
 Esc quits and prints a per-player summary.
 
-Optional remapper/mm6/mm6.toml table (bookcast ignores it):
+Optional remapper/mm/mm.toml table (bookcast ignores it):
 
     [busy_timer]
     poll_ms = 3
@@ -27,8 +27,8 @@ import time
 import tomllib
 
 HERE = Path( __file__ ).resolve().parent
-MM6 = HERE.parent
-ROOT = MM6.parent.parent
+MM = HERE.parent
+ROOT = MM.parent.parent
 sys.path.insert( 0, str( ROOT ) )
 
 from pxl_config import get_settings
@@ -38,8 +38,8 @@ get_settings( str( ROOT / "settings.toml" ) )
 from ansi import *
 from pxl_lib import PIXELS, colors_similar, get_pixel_color
 
-STATUS_PATH = MM6 / "mm6_status.json"
-CONFIG_PATH = MM6 / "mm6.toml"
+STATUS_PATH = MM / "mm_status.json"
+CONFIG_PATH = MM / "mm.toml"
 
 VK_ESCAPE = 0x1B
 _user32 = ctypes.windll.user32
@@ -131,7 +131,7 @@ def _print_duration( n, ms, hist ):
 
 
 def _print_summary( tracks ):
-    print( f"ℹ️ {GREEN}mm6 timer{RESET}: summary" )
+    print( f"ℹ️ {GREEN}mm timer{RESET}: summary" )
     for n, tr in tracks.items():
         hist = tr[ "hist" ]
         if not hist:
@@ -177,7 +177,7 @@ def main():
         }
 
     names = " ".join( f"{CYAN}{n}{RESET}" for n in tracks )
-    print( f"ℹ️ {GREEN}mm6 timer{RESET}: players {names}  "
+    print( f"ℹ️ {GREEN}mm timer{RESET}: players {names}  "
            f"poll {MAGENTA}{poll_ms}{RESET} ms  confirm {MAGENTA}{confirm}{RESET}  "
            f"Esc quits" )
 

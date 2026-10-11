@@ -11,7 +11,10 @@ target_exe = ""
 quit_key = "f12"
 
 # Optional capture-loop plugin (sibling module in this directory). Empty = remapper only.
-plugin = "mm6"
+plugin = "mm"
+
+# Party portrait click points [ x, y ], PC1 first. Ctrl+Shift+<bookcast key> casts on each in order.
+party_portraits = [ [ 827, 1293 ], [ 1127, 1293 ], [ 1427, 1293 ], [ 1727, 1293 ] ]
 
 # Optional one-shot tap sequences (not hold-through). Injected keys are not remapped or re-sequenced.
 sequence_delay_ms = 35

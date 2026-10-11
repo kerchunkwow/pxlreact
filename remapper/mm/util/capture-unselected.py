@@ -1,14 +1,14 @@
 """
-Throwaway: capture unselected-character portrait pixels for MM6 bookcasts.
+Throwaway: capture unselected-character portrait pixels for MM bookcasts.
 
 Click four unselected party portraits in order (1-4). Each click records cursor (x, y) and
-the pixel color under the cursor. Writes remapper/mm6/mm6_unselected.json and exits.
+the pixel color under the cursor. Writes remapper/mm/mm_unselected.json and exits.
 
 Not used at runtime by remapper except as a data file; delete this script after the
 file is verified.
 
 Usage (repo root, venv; stop remapper first so this process owns the mouse):
-    .pxlenv\\Scripts\\python.exe remapper\\mm6\\capture-unselected.py
+    .pxlenv\\Scripts\\python.exe remapper\\mm\\capture-unselected.py
 
 Esc aborts without writing.
 """
@@ -26,7 +26,7 @@ sys.path.insert( 0, str( ROOT ) )
 from ansi import *
 from pxl_lib import get_mouse_pos, get_pixel_color
 
-OUT_PATH = HERE / "mm6_unselected.json"
+OUT_PATH = HERE / "mm_unselected.json"
 
 VK_LBUTTON = 0x01
 VK_ESCAPE = 0x1B

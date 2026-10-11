@@ -1,15 +1,15 @@
 """
-Throwaway: capture busy-indicator pixels for MM6 party readiness bubbles.
+Throwaway: capture busy-indicator pixels for MM party readiness bubbles.
 
 Click the readiness bubble of each party member in order (1-4) while that character is
 busy. Each click records cursor (x, y) and the pixel color under the cursor. Merges into
-remapper/mm6/mm6_status.json and exits.
+remapper/mm/mm_status.json and exits.
 
 Not used at runtime by remapper except as a data file; delete this script after the
 file is verified.
 
 Usage (repo root, venv; stop remapper first so this process owns the mouse):
-    .pxlenv\\Scripts\\python.exe remapper\\mm6\\capture-busy.py
+    .pxlenv\\Scripts\\python.exe remapper\\mm\\capture-busy.py
 
 Esc aborts without writing.
 """
@@ -27,7 +27,7 @@ sys.path.insert( 0, str( ROOT ) )
 from ansi import *
 from pxl_lib import get_mouse_pos, get_pixel_color
 
-STATUS_PATH = HERE / "mm6_status.json"
+STATUS_PATH = HERE / "mm_status.json"
 
 VK_LBUTTON = 0x01
 VK_ESCAPE = 0x1B

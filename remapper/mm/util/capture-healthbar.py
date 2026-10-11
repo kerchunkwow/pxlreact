@@ -1,15 +1,15 @@
 """
-Throwaway: discover MM6 party healthbar geometry and fill colors.
+Throwaway: discover MM party healthbar geometry and fill colors.
 
 Geometry (first run): click the bright midpoint of player 1's healthbar at full health.
 The script measures fill color, vertical extent, width, then locates players 2-4.
 
 Fill shades (this or a later run): with green, yellow, and red bars all visible, click once
 on the game. The four known columns are scanned for additional fill colors so yellow/red
-HP still counts. Merges into remapper/mm6/mm6_status.json (portraits are preserved).
+HP still counts. Merges into remapper/mm/mm_status.json (portraits are preserved).
 
 Usage (repo root, venv; stop remapper first):
-    .pxlenv\\Scripts\\python.exe remapper\\mm6\\capture-healthbar.py
+    .pxlenv\\Scripts\\python.exe remapper\\mm\\capture-healthbar.py
 
 Esc aborts without writing.
 """
@@ -34,8 +34,8 @@ get_settings( str( ROOT / "settings.toml" ) )
 from ansi import *
 from pxl_lib import PIXELS, colors_similar, get_mouse_pos, get_pixel_color
 
-STATUS_PATH = HERE / "mm6_status.json"
-UNSELECTED_PATH = HERE / "mm6_unselected.json"
+STATUS_PATH = HERE / "mm_status.json"
+UNSELECTED_PATH = HERE / "mm_unselected.json"
 
 VK_LBUTTON = 0x01
 VK_ESCAPE = 0x1B

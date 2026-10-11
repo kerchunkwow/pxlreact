@@ -1,13 +1,13 @@
 """
-Throwaway: capture a clickable (x, y) on each MM6 party portrait.
+Throwaway: capture a clickable (x, y) on each MM party portrait.
 
 Click anywhere on portraits 1-4 in order. Precision does not matter; the click is a
-future target/select point. Merges into remapper/mm6/mm6_status.json and exits.
+future target/select point. Merges into remapper/mm/mm_status.json and exits.
 
 Delete this script after the file is verified.
 
 Usage (repo root, venv; stop remapper first):
-    .pxlenv\\Scripts\\python.exe remapper\\mm6\\capture-portrait.py
+    .pxlenv\\Scripts\\python.exe remapper\\mm\\capture-portrait.py
 
 Esc aborts without writing.
 """
@@ -25,7 +25,7 @@ sys.path.insert( 0, str( ROOT ) )
 from ansi import *
 from pxl_lib import get_mouse_pos
 
-STATUS_PATH = HERE / "mm6_status.json"
+STATUS_PATH = HERE / "mm_status.json"
 
 VK_LBUTTON = 0x01
 VK_ESCAPE = 0x1B

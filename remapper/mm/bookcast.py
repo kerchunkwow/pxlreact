@@ -1,5 +1,5 @@
 """
-MM6 bookcast plugin for remapper.
+MM bookcast plugin for remapper.
 
 DEFINE records caster, book key, school click, spell click, then an optional target click,
 H (heal lowest-HP portrait), or T (cursor: click wherever the mouse is at execute time).
@@ -11,7 +11,7 @@ position. With no target, heal, or cursor flag, the cursor is moved back to wher
 when the bind was pressed.
 
 Unselected portrait pixels, busy indicators, and healthbar geometry come from
-remapper/mm6/mm6_status.json. Loaded by remapper when plugin = "mm6".
+remapper/mm/mm_status.json. Loaded by remapper when plugin = "mm".
 """
 
 from dataclasses import dataclass
@@ -31,9 +31,9 @@ from pyinterception.src.interception._keycodes import get_key_information
 from pyinterception.src.interception.exceptions import UnknownKeyError
 
 HERE = Path( __file__ ).resolve().parent
-CONFIG_PATH = HERE / "mm6.toml"
-CASTS_PATH = HERE / "mm6_bookcasts.json"
-STATUS_PATH = HERE / "mm6_status.json"
+CONFIG_PATH = HERE / "mm.toml"
+CASTS_PATH = HERE / "mm_bookcasts.json"
+STATUS_PATH = HERE / "mm_status.json"
 
 SPELL_CLICK_PX = 12
 HEAL_KEY = "h"
@@ -243,19 +243,19 @@ class BookcastPlugin:
 
         n = len( self.casts )
         u = len( self.unselected )
-        print( f"ℹ️ {GREEN}mm6{RESET}: {MAGENTA}{n}{RESET} bookcast(s); "
+        print( f"ℹ️ {GREEN}mm{RESET}: {MAGENTA}{n}{RESET} bookcast(s); "
                f"DEFINE = {CYAN}{self._chord_label()}{RESET}" )
         if u == 4:
-            print( f"ℹ️ {GREEN}mm6{RESET}: unselected portraits loaded from "
+            print( f"ℹ️ {GREEN}mm{RESET}: unselected portraits loaded from "
                    f"{CYAN}{STATUS_PATH.name}{RESET}" )
         else:
-            print( f"{YELLOW}mm6: unselected portraits missing or incomplete "
+            print( f"{YELLOW}mm: unselected portraits missing or incomplete "
                    f"({MAGENTA}{u}{RESET}/4); caster key will always be sent" )
         b = len( self.busy )
         if b == 4:
-            print( f"ℹ️ {GREEN}mm6{RESET}: busy indicators loaded from {CYAN}{STATUS_PATH.name}{RESET}" )
+            print( f"ℹ️ {GREEN}mm{RESET}: busy indicators loaded from {CYAN}{STATUS_PATH.name}{RESET}" )
         else:
-            print( f"{YELLOW}mm6: busy indicators missing or incomplete "
+            print( f"{YELLOW}mm: busy indicators missing or incomplete "
                    f"({MAGENTA}{b}{RESET}/4); bookcasts will not check busy" )
         if self.healthbar is not None and len( self.healthbar_x ) == 4:
             parts = []
@@ -264,21 +264,21 @@ class BookcastPlugin:
                 parts.append( f"{CYAN}{pn}{RESET}={MAGENTA}{pct:.0f}%{RESET}" if pct is not None
                               else f"{CYAN}{pn}{RESET}=?" )
             nfill = len( self.healthbar[ "fill_colors" ] )
-            print( f"ℹ️ {GREEN}mm6{RESET}: health " + " ".join( parts )
+            print( f"ℹ️ {GREEN}mm{RESET}: health " + " ".join( parts )
                    + f"  ({MAGENTA}{nfill}{RESET} fill shade(s))" )
             if nfill < 3:
-                print( f"{YELLOW}mm6: only {MAGENTA}{nfill}{RESET} HP fill shade(s); "
+                print( f"{YELLOW}mm: only {MAGENTA}{nfill}{RESET} HP fill shade(s); "
                        f"yellow/red bars need {CYAN}capture-healthbar.py{RESET} "
                        f"with all three colors visible" )
         else:
-            print( f"{YELLOW}mm6: healthbars not loaded; run {CYAN}capture-healthbar.py{RESET}" )
+            print( f"{YELLOW}mm: healthbars not loaded; run {CYAN}capture-healthbar.py{RESET}" )
         if len( self.portrait ) == 4:
             parts = [ f"{CYAN}{pn}{RESET}=({MAGENTA}{self.portrait[pn][0]}{RESET},"
                       f"{MAGENTA}{self.portrait[pn][1]}{RESET})"
                       for pn in ( "1", "2", "3", "4" ) ]
-            print( f"ℹ️ {GREEN}mm6{RESET}: portrait " + " ".join( parts ) )
+            print( f"ℹ️ {GREEN}mm{RESET}: portrait " + " ".join( parts ) )
         else:
-            print( f"{YELLOW}mm6: portraits incomplete ({MAGENTA}{len( self.portrait )}{RESET}/4); "
+            print( f"{YELLOW}mm: portraits incomplete ({MAGENTA}{len( self.portrait )}{RESET}/4); "
                    f"run {CYAN}capture-portrait.py{RESET}" )
         for cast in self.casts:
             self._print_cast( cast )
@@ -566,19 +566,19 @@ class BookcastPlugin:
         pos = list( get_mouse_pos() )
         if self._draft_school is None:
             self._draft_school = pos
-            print( f"ℹ️ {GREEN}mm6{RESET}: school click {MAGENTA}{pos[0]},{pos[1]}{RESET}" )
+            print( f"ℹ️ {GREEN}mm{RESET}: school click {MAGENTA}{pos[0]},{pos[1]}{RESET}" )
         elif not self._far( self._draft_school, pos ) and self._draft_spell is None:
             pass
         elif self._draft_spell is None:
             self._draft_spell = pos
-            print( f"ℹ️ {GREEN}mm6{RESET}: spell click {MAGENTA}{pos[0]},{pos[1]}{RESET}" )
+            print( f"ℹ️ {GREEN}mm{RESET}: spell click {MAGENTA}{pos[0]},{pos[1]}{RESET}" )
         elif not self._far( self._draft_spell, pos ):
             pass
         else:
             self._draft_target = pos
             self._draft_heal = False
             self._draft_cursor = False
-            print( f"ℹ️ {GREEN}mm6{RESET}: target click {MAGENTA}{pos[0]},{pos[1]}{RESET}" )
+            print( f"ℹ️ {GREEN}mm{RESET}: target click {MAGENTA}{pos[0]},{pos[1]}{RESET}" )
         return False
 
     def _far( self, a, b ):
@@ -630,14 +630,14 @@ class BookcastPlugin:
                 self._draft_cursor = False
                 self._draft_target = None
                 self._swallow_up.add( src )
-                print( f"ℹ️ {GREEN}mm6{RESET}: heal target (lowest HP portrait)" )
+                print( f"ℹ️ {GREEN}mm{RESET}: heal target (lowest HP portrait)" )
                 return True
             if name == CURSOR_KEY and self._draft_spell is not None:
                 self._draft_cursor = True
                 self._draft_heal = False
                 self._draft_target = None
                 self._swallow_up.add( src )
-                print( f"ℹ️ {GREEN}mm6{RESET}: cursor target (click mouse position at execute)" )
+                print( f"ℹ️ {GREEN}mm{RESET}: cursor target (click mouse position at execute)" )
                 return True
             if src in self._draft_down:
                 self.remapper._forward( device, stroke )
@@ -646,10 +646,10 @@ class BookcastPlugin:
             if name is not None:
                 if self._draft_caster is None:
                     self._draft_caster = name
-                    print( f"ℹ️ {GREEN}mm6{RESET}: caster {CYAN}{name}{RESET}" )
+                    print( f"ℹ️ {GREEN}mm{RESET}: caster {CYAN}{name}{RESET}" )
                 elif self._draft_book is None:
                     self._draft_book = name
-                    print( f"ℹ️ {GREEN}mm6{RESET}: book {CYAN}{name}{RESET}" )
+                    print( f"ℹ️ {GREEN}mm{RESET}: book {CYAN}{name}{RESET}" )
             self.remapper._forward( device, stroke )
             return True
 
@@ -670,7 +670,7 @@ class BookcastPlugin:
             self._finish_define()
             return
         if self._mode != "idle" or self._executing:
-            print( f"{YELLOW}mm6: DEFINE ignored (busy){RESET}" )
+            print( f"{YELLOW}mm: DEFINE ignored (busy){RESET}" )
             return
         if not self.remapper.window_ok():
             return
@@ -683,7 +683,7 @@ class BookcastPlugin:
         self._draft_heal = False
         self._draft_cursor = False
         self._draft_down = set()
-        print( f"ℹ️ {GREEN}mm6{RESET}: DEFINE started — press caster, book key, "
+        print( f"ℹ️ {GREEN}mm{RESET}: DEFINE started — press caster, book key, "
                f"click school, click spell, optional target click or {CYAN}H{RESET} "
                f"(heal lowest HP) or {CYAN}T{RESET} (cursor), then "
                f"{CYAN}{self._chord_label()}{RESET}" )
@@ -696,12 +696,12 @@ class BookcastPlugin:
         cursor = self._draft_cursor
         self._mode = "idle"
         if not caster or not book or not school or not spell:
-            print( f"{YELLOW}mm6: DEFINE cancelled "
+            print( f"{YELLOW}mm: DEFINE cancelled "
                    f"(need caster, book key, school click, and spell click){RESET}" )
             return
         self._pending = ( caster, book, school, spell, target, heal, cursor )
         self._mode = "binding"
-        print( f"ℹ️ {GREEN}mm6{RESET}: DEFINE complete — press the key to bind as "
+        print( f"ℹ️ {GREEN}mm{RESET}: DEFINE complete — press the key to bind as "
                f"{CYAN}ctrl-<key>{RESET}" )
 
     def _commit_bind( self, bind_name ):
@@ -722,7 +722,7 @@ class BookcastPlugin:
         self.casts.append( cast )
         self._rebuild_binds()
         self._save_casts()
-        print( f"ℹ️ {GREEN}mm6{RESET}: bound and saved" )
+        print( f"ℹ️ {GREEN}mm{RESET}: bound and saved" )
         self._print_cast( cast )
 
     def _caster_unselected( self, caster ):
@@ -748,27 +748,27 @@ class BookcastPlugin:
     def _heal_target( self ):
         """Portrait (x, y) of the lowest-HP player below heal_skip_pct, or None to abort."""
         if len( self.portrait ) < 4:
-            print( f"{YELLOW}mm6: heal aborted "
+            print( f"{YELLOW}mm: heal aborted "
                    f"(portraits incomplete, {MAGENTA}{len( self.portrait )}{RESET}/4){RESET}" )
             return None
         pcts = {}
         for n in ( "1", "2", "3", "4" ):
             pct = self.health_pct( n )
             if pct is None:
-                print( f"{YELLOW}mm6: heal aborted (healthbars incomplete){RESET}" )
+                print( f"{YELLOW}mm: heal aborted (healthbars incomplete){RESET}" )
                 return None
             pcts[ n ] = pct
         if all( p >= self.heal_skip_pct for p in pcts.values() ):
-            print( f"ℹ️ {GREEN}mm6{RESET}: heal skipped "
+            print( f"ℹ️ {GREEN}mm{RESET}: heal skipped "
                    f"(all ≥ {MAGENTA}{self.heal_skip_pct:.0f}%{RESET})" )
             return None
         n = min( pcts, key = lambda k: ( pcts[ k ], k ) )
         xy = self.portrait_xy( n )
         if xy is None:
-            print( f"{YELLOW}mm6: heal aborted "
+            print( f"{YELLOW}mm: heal aborted "
                    f"(no portrait for player {CYAN}{n}{RESET}){RESET}" )
             return None
-        print( f"ℹ️ {GREEN}mm6{RESET}: heal -> player {CYAN}{n}{RESET} "
+        print( f"ℹ️ {GREEN}mm{RESET}: heal -> player {CYAN}{n}{RESET} "
                f"{MAGENTA}{pcts[n]:.0f}%{RESET}" )
         return xy
 
@@ -785,7 +785,7 @@ class BookcastPlugin:
 
     def _execute( self, cast ):
         if self._caster_busy( cast.caster ):
-            print( f"{YELLOW}mm6: {cast.display_label()} busy{RESET}" )
+            print( f"{YELLOW}mm: {cast.display_label()} busy{RESET}" )
             return
         print( f"{cast.display_label()}" )
         cursor_xy = None
@@ -793,7 +793,7 @@ class BookcastPlugin:
         if cast.cursor:
             pos = get_mouse_pos()
             cursor_xy = [ int( pos[ 0 ] ), int( pos[ 1 ] ) ]
-            print( f"ℹ️ {GREEN}mm6{RESET}: cursor {MAGENTA}{cursor_xy[0]},{cursor_xy[1]}{RESET}" )
+            print( f"ℹ️ {GREEN}mm{RESET}: cursor {MAGENTA}{cursor_xy[0]},{cursor_xy[1]}{RESET}" )
         elif not cast.heal and cast.target is None:
             pos = get_mouse_pos()
             restore_xy = [ int( pos[ 0 ] ), int( pos[ 1 ] ) ]

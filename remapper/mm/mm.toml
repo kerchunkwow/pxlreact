@@ -3,7 +3,7 @@ define_ctrl = true
 define_alt = true
 define_key = "b"
 
-# Physical keys that never fire a bookcast under Ctrl (MM6 strafe is Ctrl+Left/Right via A/D).
+# Physical keys that never fire a bookcast under Ctrl (MM strafe is Ctrl+Left/Right via A/D).
 execute_passthrough = [ "a", "d" ]
 
 # SSD tolerance for the unselected-portrait color check; omit to use settings.toml color.default_tolerance.
@@ -18,3 +18,12 @@ after_key = 50
 after_move = 30
 click_hold = 30
 double_click = 30
+
+# Looping bookcast (Ctrl+Shift+<key>). After each cast, wait up to busy_appear_ms for the caster's
+# busy bubble to appear, then up to ready_timeout_ms for it to clear (timeout aborts the loop).
+# fallback_wait_ms is a fixed wait used when the caster has no captured busy pixel.
+[bookcast_loop]
+poll_ms = 10
+busy_appear_ms = 1000
+ready_timeout_ms = 20000
+fallback_wait_ms = 2000
