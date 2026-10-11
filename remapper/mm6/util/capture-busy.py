@@ -1,13 +1,15 @@
 """
-Throwaway: capture a clickable (x, y) on each MM6 party portrait.
+Throwaway: capture busy-indicator pixels for MM6 party readiness bubbles.
 
-Click anywhere on portraits 1-4 in order. Precision does not matter; the click is a
-future target/select point. Merges into remapper/mm6_status.json and exits.
+Click the readiness bubble of each party member in order (1-4) while that character is
+busy. Each click records cursor (x, y) and the pixel color under the cursor. Merges into
+remapper/mm6/mm6_status.json and exits.
 
-Delete this script after the file is verified.
+Not used at runtime by remapper except as a data file; delete this script after the
+file is verified.
 
-Usage (repo root, venv; stop remapper first):
-    .pxlenv\\Scripts\\python.exe remapper\\capture-portrait.py
+Usage (repo root, venv; stop remapper first so this process owns the mouse):
+    .pxlenv\\Scripts\\python.exe remapper\\mm6\\capture-busy.py
 
 Esc aborts without writing.
 """
@@ -19,11 +21,11 @@ import sys
 import time
 
 HERE = Path( __file__ ).resolve().parent
-ROOT = HERE.parent
+ROOT = HERE.parent.parent
 sys.path.insert( 0, str( ROOT ) )
 
 from ansi import *
-from pxl_lib import get_mouse_pos
+from pxl_lib import get_mouse_pos, get_pixel_color
 
 STATUS_PATH = HERE / "mm6_status.json"
 
@@ -62,8 +64,8 @@ def _load_status():
 
 
 def main():
-    print( f"ℹ️ Click anywhere on portraits {CYAN}1{RESET} through {CYAN}4{RESET} in order." )
-    print( f"ℹ️ Precision is unimportant. Esc cancels." )
+    print( f"ℹ️ Click busy readiness bubbles {CYAN}1{RESET} through {CYAN}4{RESET} in order." )
+    print( f"ℹ️ Pixel under the cursor is stored with each click. Esc cancels." )
     print( f"ℹ️ Merging into {CYAN}{STATUS_PATH}{RESET} after the fourth click." )
 
     if _down( VK_LBUTTON ) and not _wait_release( VK_LBUTTON ):
@@ -80,9 +82,15 @@ def main():
         held = _down( VK_LBUTTON )
         if held and not prev:
             x, y = get_mouse_pos()
-            samples[ str( n ) ] = { "x": int( x ), "y": int( y ) }
-            print( f"ℹ️ {GREEN}{n}{RESET}: ({MAGENTA}{x}{RESET}, {MAGENTA}{y}{RESET})" )
-            n += 1
+            color = get_pixel_color( x, y )
+            if color is None:
+                print( f"{RED}Error: no pixel color at {MAGENTA}{x},{y}{RESET}; try again." )
+            else:
+                samples[ str( n ) ] = { "x": int( x ), "y": int( y ),
+                                        "color": [ int( c ) for c in color ] }
+                print( f"ℹ️ {GREEN}{n}{RESET}: ({MAGENTA}{x}{RESET}, {MAGENTA}{y}{RESET}) "
+                       f"rgb {MAGENTA}{tuple( color )}{RESET}" )
+                n += 1
             if not _wait_release( VK_LBUTTON ):
                 print( f"{YELLOW}Cancelled.{RESET}" )
                 return 1
@@ -92,11 +100,11 @@ def main():
         time.sleep( 0.01 )
 
     status = _load_status()
-    for n, pos in samples.items():
+    for n, sample in samples.items():
         entry = status[ "players" ].get( n )
         if not isinstance( entry, dict ):
             entry = {}
-        entry[ "portrait" ] = pos
+        entry[ "busy" ] = sample
         status[ "players" ][ n ] = entry
 
     STATUS_PATH.write_text( json.dumps( status, indent = 2 ) + "\n", encoding = "utf-8" )

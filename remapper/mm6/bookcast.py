@@ -1,15 +1,17 @@
 """
 MM6 bookcast plugin for remapper.
 
-DEFINE records caster, book key, school click, spell click, then an optional target click
-or H to flag a healing cast that aims at the lowest-HP portrait. BIND assigns ctrl-<key>.
-EXECUTE skips the caster key if that portrait is already selected, opens the book, clicks
-the school, double-clicks the spell, then either clicks a fixed target or (heal) the
-lowest-HP player below the skip threshold.
+DEFINE records caster, book key, school click, spell click, then an optional target click,
+H (heal lowest-HP portrait), or T (cursor: click wherever the mouse is at execute time).
+BIND assigns ctrl-<key>. EXECUTE aborts if the caster readiness bubble matches the stored
+busy color. Otherwise it skips the caster key if that portrait is already selected, opens
+the book, clicks the school, double-clicks the spell, then either clicks a fixed target,
+the lowest-HP player below the skip threshold, or (cursor) Esc then the captured cursor
+position. With no target, heal, or cursor flag, the cursor is moved back to where it was
+when the bind was pressed.
 
-Unselected portrait pixels and healthbar geometry come from remapper/mm6_status.json
-(capture-healthbar.py), with a fallback to remapper/mm6_unselected.json for portraits only.
-Loaded by remapper when plugin = "mm6".
+Unselected portrait pixels, busy indicators, and healthbar geometry come from
+remapper/mm6/mm6_status.json. Loaded by remapper when plugin = "mm6".
 """
 
 from dataclasses import dataclass
@@ -31,11 +33,11 @@ from pyinterception.src.interception.exceptions import UnknownKeyError
 HERE = Path( __file__ ).resolve().parent
 CONFIG_PATH = HERE / "mm6.toml"
 CASTS_PATH = HERE / "mm6_bookcasts.json"
-UNSELECTED_PATH = HERE / "mm6_unselected.json"
 STATUS_PATH = HERE / "mm6_status.json"
 
 SPELL_CLICK_PX = 12
 HEAL_KEY = "h"
+CURSOR_KEY = "t"
 
 _NAME_KEYS = (
     list( "0123456789abcdefghijklmnopqrstuvwxyz" )
@@ -76,23 +78,70 @@ SHIFT_SCANS = _mod_scan( "shiftleft", "shiftright", "shift" )
 MOD_SCANS = CTRL_SCANS | ALT_SCANS | SHIFT_SCANS
 
 
+def _bind_token( stroke ):
+    """Friendly key name when known, otherwise sc<hex> or sc<hex>e0 for the raw scan."""
+    src = ( stroke.code, bool( stroke.flags & KeyFlag.KEY_E0 ) )
+    name = KEY_NAMES.get( src )
+    if name is not None:
+        return name
+    token = f"sc{stroke.code:02x}"
+    if src[ 1 ]:
+        token += "e0"
+    return token
+
+
+def _bind_lookup( token ):
+    """( scan_code, is_extended ) for a named key or an scXX / scXXe0 token."""
+    token = str( token ).strip().lower()
+    if token.startswith( "sc" ):
+        rest = token[ 2: ]
+        extended = rest.endswith( "e0" )
+        hex_part = rest[ :-2 ] if extended else rest
+        return ( int( hex_part, 16 ), extended )
+    info = _key_info( token )
+    return ( info.scan_code, info.is_extended )
+
+
 def _xy( raw ):
     return [ int( raw[ 0 ] ), int( raw[ 1 ] ) ]
+
+
+def _post_keys( raw ):
+    if not raw:
+        return None
+    if isinstance( raw, str ):
+        raw = [ raw ]
+    if not isinstance( raw, list ) or not raw:
+        return None
+    keys = []
+    for item in raw:
+        name = str( item ).strip().lower()
+        if not name:
+            continue
+        try:
+            _key_info( name )
+        except UnknownKeyError:
+            print( f"{YELLOW}Warning: unknown post_keys entry {CYAN}{item}{RESET}" )
+            continue
+        keys.append( name )
+    return keys or None
 
 
 def _rgb( raw ):
     return ( int( raw[ 0 ] ), int( raw[ 1 ] ), int( raw[ 2 ] ) )
 
 
-def health_pct_from( fill, x, y_top, y_bottom, tolerance ):
-    """Percent of column pixels matching fill_color from y_top through y_bottom, or None."""
+def health_pct_from( fills, x, y_top, y_bottom, tolerance ):
+    """Percent of column pixels matching any fill color from y_top through y_bottom, or None."""
     height = y_bottom - y_top + 1
-    if height <= 0:
+    if height <= 0 or not fills:
         return None
     hits = 0
     for y in range( y_top, y_bottom + 1 ):
         observed = get_pixel_color( x, y )
-        if observed is not None and colors_similar( observed, fill, tolerance ):
+        if observed is None:
+            continue
+        if any( colors_similar( observed, fill, tolerance ) for fill in fills ):
             hits += 1
     return 100.0 * hits / height
 
@@ -106,19 +155,33 @@ class Bookcast:
     spell: list
     target: list | None = None
     heal: bool = False
+    cursor: bool = False
+    label: str = ""
+    post_keys: list | None = None
+
+    def display_label( self ):
+        name = self.label.strip()
+        return name if name else f"ctrl-{self.bind}"
 
     def to_json( self ):
-        out = {
+        out = {}
+        if self.label.strip():
+            out[ "label" ] = self.label.strip()
+        out.update( {
             "bind": self.bind,
             "caster": self.caster,
             "book": self.book,
             "school": list( self.school ),
             "spell": list( self.spell ),
-        }
-        if self.heal:
+        } )
+        if self.cursor:
+            out[ "cursor" ] = True
+        elif self.heal:
             out[ "heal" ] = True
         elif self.target is not None:
             out[ "target" ] = list( self.target )
+        if self.post_keys:
+            out[ "post_keys" ] = list( self.post_keys )
         return out
 
     @classmethod
@@ -126,6 +189,14 @@ class Bookcast:
         target = raw.get( "target" )
         if target is not None:
             target = _xy( target )
+        cursor = bool( raw.get( "cursor", False ) )
+        heal = bool( raw.get( "heal", False ) )
+        if cursor:
+            heal = False
+            target = None
+        elif heal:
+            target = None
+        post_keys = _post_keys( raw.get( "post_keys" ) )
         return cls(
             bind = str( raw[ "bind" ] ).strip().lower(),
             caster = str( raw[ "caster" ] ).strip().lower(),
@@ -133,7 +204,10 @@ class Bookcast:
             school = _xy( raw[ "school" ] ),
             spell = _xy( raw[ "spell" ] ),
             target = target,
-            heal = bool( raw.get( "heal", False ) ),
+            heal = heal,
+            cursor = cursor,
+            label = str( raw.get( "label" ) or "" ).strip(),
+            post_keys = post_keys,
         )
 
 
@@ -145,7 +219,8 @@ class BookcastPlugin:
     def __init__( self, remapper ):
         self.remapper = remapper
         self._load_config()
-        self.unselected, self.healthbar, self.healthbar_x, self.portrait = self._load_status()
+        ( self.unselected, self.healthbar, self.healthbar_x,
+          self.portrait, self.busy ) = self._load_status()
         self._register_health_pixels()
         self.casts = self._load_casts()
         self._by_bind = {}
@@ -163,6 +238,7 @@ class BookcastPlugin:
         self._draft_spell = None
         self._draft_target = None
         self._draft_heal = False
+        self._draft_cursor = False
         self._draft_down = set()
 
         n = len( self.casts )
@@ -170,18 +246,30 @@ class BookcastPlugin:
         print( f"ℹ️ {GREEN}mm6{RESET}: {MAGENTA}{n}{RESET} bookcast(s); "
                f"DEFINE = {CYAN}{self._chord_label()}{RESET}" )
         if u == 4:
-            src = STATUS_PATH.name if STATUS_PATH.is_file() else UNSELECTED_PATH.name
-            print( f"ℹ️ {GREEN}mm6{RESET}: unselected portraits loaded from {CYAN}{src}{RESET}" )
+            print( f"ℹ️ {GREEN}mm6{RESET}: unselected portraits loaded from "
+                   f"{CYAN}{STATUS_PATH.name}{RESET}" )
         else:
             print( f"{YELLOW}mm6: unselected portraits missing or incomplete "
                    f"({MAGENTA}{u}{RESET}/4); caster key will always be sent" )
+        b = len( self.busy )
+        if b == 4:
+            print( f"ℹ️ {GREEN}mm6{RESET}: busy indicators loaded from {CYAN}{STATUS_PATH.name}{RESET}" )
+        else:
+            print( f"{YELLOW}mm6: busy indicators missing or incomplete "
+                   f"({MAGENTA}{b}{RESET}/4); bookcasts will not check busy" )
         if self.healthbar is not None and len( self.healthbar_x ) == 4:
             parts = []
             for pn in ( "1", "2", "3", "4" ):
                 pct = self.health_pct( pn )
                 parts.append( f"{CYAN}{pn}{RESET}={MAGENTA}{pct:.0f}%{RESET}" if pct is not None
                               else f"{CYAN}{pn}{RESET}=?" )
-            print( f"ℹ️ {GREEN}mm6{RESET}: health " + " ".join( parts ) )
+            nfill = len( self.healthbar[ "fill_colors" ] )
+            print( f"ℹ️ {GREEN}mm6{RESET}: health " + " ".join( parts )
+                   + f"  ({MAGENTA}{nfill}{RESET} fill shade(s))" )
+            if nfill < 3:
+                print( f"{YELLOW}mm6: only {MAGENTA}{nfill}{RESET} HP fill shade(s); "
+                       f"yellow/red bars need {CYAN}capture-healthbar.py{RESET} "
+                       f"with all three colors visible" )
         else:
             print( f"{YELLOW}mm6: healthbars not loaded; run {CYAN}capture-healthbar.py{RESET}" )
         if len( self.portrait ) == 4:
@@ -205,16 +293,21 @@ class BookcastPlugin:
         return "+".join( parts )
 
     def _print_cast( self, cast ):
-        if cast.heal:
-            tgt = f" {GREEN}heal{RESET} (lowest HP)"
+        if cast.cursor:
+            tgt = f" {GREEN}cursor{RESET}"
+        elif cast.heal:
+            tgt = f" {GREEN}heal{RESET}"
         elif cast.target:
             tgt = f" target {MAGENTA}{cast.target[0]},{cast.target[1]}{RESET}"
         else:
             tgt = ""
-        print( f"ℹ️ {GREEN}mm6{RESET}: ctrl-{CYAN}{cast.bind}{RESET} -> "
-               f"{CYAN}{cast.caster}{RESET} {CYAN}{cast.book}{RESET} "
-               f"school {MAGENTA}{cast.school[0]},{cast.school[1]}{RESET} "
-               f"spell {MAGENTA}{cast.spell[0]},{cast.spell[1]}{RESET}{tgt}" )
+        if cast.post_keys:
+            tgt += f" post {CYAN}{' '.join( cast.post_keys )}{RESET}"
+        bind = f"{CYAN}ctrl-{cast.bind}{RESET}"
+        if cast.label.strip():
+            print( f"ℹ️ {cast.label.strip()}  {bind}{tgt}" )
+        else:
+            print( f"ℹ️ {bind}{tgt}" )
 
     def _load_config( self ):
         try:
@@ -235,6 +328,21 @@ class BookcastPlugin:
         except UnknownKeyError:
             print( f"{RED}Error: unknown define_key {CYAN}{self.define_key}{RESET}" )
             sys.exit( 1 )
+
+        raw_pass = raw.get( "execute_passthrough" ) or [ "a", "d" ]
+        if isinstance( raw_pass, str ):
+            raw_pass = [ raw_pass ]
+        if not isinstance( raw_pass, list ):
+            print( f"{RED}Error: execute_passthrough must be a list of keys{RESET}" )
+            sys.exit( 1 )
+        self._execute_passthrough = set()
+        for name in raw_pass:
+            try:
+                info = _key_info( str( name ) )
+            except UnknownKeyError:
+                print( f"{YELLOW}Warning: unknown execute_passthrough key {CYAN}{name}{RESET}" )
+                continue
+            self._execute_passthrough.add( ( info.scan_code, info.is_extended ) )
 
         delays = raw.get( "delays_ms" ) or {}
         if not isinstance( delays, dict ):
@@ -271,15 +379,15 @@ class BookcastPlugin:
         if not isinstance( raw, dict ):
             print( f"{YELLOW}Warning: {CYAN}{path}{RESET} must be a JSON object" )
             return {}
-        # Legacy mm6_unselected.json is keyed 1-4; status file uses players.*
-        src = raw.get( "players", raw )
+        src = raw.get( "players" )
         if not isinstance( src, dict ):
             return {}
         out = {}
         for n in ( "1", "2", "3", "4" ):
             item = src.get( n )
-            if isinstance( item, dict ) and "unselected" in item:
-                item = item[ "unselected" ]
+            if not isinstance( item, dict ):
+                continue
+            item = item.get( "unselected" )
             if not isinstance( item, dict ) or "color" not in item:
                 continue
             try:
@@ -294,6 +402,7 @@ class BookcastPlugin:
         healthbar = None
         healthbar_x = {}
         portrait = {}
+        busy = {}
         if STATUS_PATH.is_file():
             try:
                 raw = json.loads( STATUS_PATH.read_text( encoding = "utf-8" ) )
@@ -305,8 +414,19 @@ class BookcastPlugin:
                 hb = raw.get( "healthbar" )
                 players = raw.get( "players" ) or {}
                 try:
+                    fills = []
+                    raw_fills = hb.get( "fill_colors" )
+                    if isinstance( raw_fills, list ):
+                        for item in raw_fills:
+                            try:
+                                fills.append( _rgb( item ) )
+                            except ( KeyError, TypeError, ValueError, IndexError ):
+                                continue
+                    if not fills:
+                        fills = [ _rgb( hb[ "fill_color" ] ) ]
                     healthbar = {
-                        "fill_color": _rgb( hb[ "fill_color" ] ),
+                        "fill_color": fills[ 0 ],
+                        "fill_colors": fills,
                         "y_top": int( hb[ "y_top" ] ),
                         "y_bottom": int( hb[ "y_bottom" ] ),
                         "width": int( hb[ "width" ] ),
@@ -332,15 +452,20 @@ class BookcastPlugin:
                             portrait[ n ] = ( int( por[ 0 ] ), int( por[ 1 ] ) )
                     except ( KeyError, TypeError, ValueError, IndexError ):
                         print( f"{YELLOW}Warning: bad portrait for player {CYAN}{n}{RESET}" )
-        if len( unselected ) < 4:
-            fallback = self._load_unselected_file( UNSELECTED_PATH )
-            for n, v in fallback.items():
-                unselected.setdefault( n, v )
-        return unselected, healthbar, healthbar_x, portrait
+                    marker = p.get( "busy" )
+                    if isinstance( marker, dict ):
+                        try:
+                            busy[ n ] = self._parse_unselected_entry( marker )
+                        except ( KeyError, TypeError, ValueError, IndexError ):
+                            print( f"{YELLOW}Warning: bad busy entry {CYAN}{n}{RESET} in "
+                                   f"{CYAN}{STATUS_PATH}{RESET}" )
+        return unselected, healthbar, healthbar_x, portrait, busy
 
     def _register_health_pixels( self ):
         points = []
         for marker in self.unselected.values():
+            points.append( ( marker[ "x" ], marker[ "y" ] ) )
+        for marker in self.busy.values():
             points.append( ( marker[ "x" ], marker[ "y" ] ) )
         hb = self.healthbar
         if hb is not None:
@@ -357,7 +482,7 @@ class BookcastPlugin:
         if hb is None or x is None:
             return None
         return health_pct_from(
-            hb[ "fill_color" ], x, hb[ "y_top" ], hb[ "y_bottom" ], self.unselected_tolerance )
+            hb[ "fill_colors" ], x, hb[ "y_top" ], hb[ "y_bottom" ], self.unselected_tolerance )
 
     def portrait_xy( self, player ):
         """Clickable portrait point (x, y) for player '1'-'4', or None if not captured."""
@@ -365,10 +490,19 @@ class BookcastPlugin:
 
     def _load_casts( self ):
         if not CASTS_PATH.is_file():
+            self._write_empty_casts()
             return []
         try:
-            raw = json.loads( CASTS_PATH.read_text( encoding = "utf-8" ) )
-        except ( OSError, json.JSONDecodeError ) as exc:
+            text = CASTS_PATH.read_text( encoding = "utf-8" )
+        except OSError as exc:
+            print( f"{RED}Error: cannot read {CYAN}{CASTS_PATH}{RESET} ({exc})" )
+            sys.exit( 1 )
+        if not text.strip():
+            self._write_empty_casts()
+            return []
+        try:
+            raw = json.loads( text )
+        except json.JSONDecodeError as exc:
             print( f"{RED}Error: cannot read {CYAN}{CASTS_PATH}{RESET} ({exc})" )
             sys.exit( 1 )
         if not isinstance( raw, list ):
@@ -383,6 +517,9 @@ class BookcastPlugin:
                        f"(re-DEFINE; needs school click) ({exc})" )
         return casts
 
+    def _write_empty_casts( self ):
+        CASTS_PATH.write_text( "[]\n", encoding = "utf-8" )
+
     def _save_casts( self ):
         payload = [ c.to_json() for c in self.casts ]
         CASTS_PATH.write_text( json.dumps( payload, indent = 2 ) + "\n", encoding = "utf-8" )
@@ -391,11 +528,11 @@ class BookcastPlugin:
         self._by_bind = {}
         for cast in self.casts:
             try:
-                info = _key_info( cast.bind )
-            except UnknownKeyError:
+                lookup = _bind_lookup( cast.bind )
+            except ( UnknownKeyError, ValueError, IndexError ):
                 print( f"{YELLOW}Warning: unknown bookcast bind {CYAN}{cast.bind}{RESET}" )
                 continue
-            self._by_bind[ ( info.scan_code, info.is_extended ) ] = cast
+            self._by_bind[ lookup ] = cast
 
     def _sleep_ms( self, name ):
         time.sleep( self.delays[ name ] / 1000.0 )
@@ -440,6 +577,7 @@ class BookcastPlugin:
         else:
             self._draft_target = pos
             self._draft_heal = False
+            self._draft_cursor = False
             print( f"ℹ️ {GREEN}mm6{RESET}: target click {MAGENTA}{pos[0]},{pos[1]}{RESET}" )
         return False
 
@@ -477,14 +615,7 @@ class BookcastPlugin:
             if is_up:
                 self.remapper._forward( device, stroke )
                 return True
-            name = self._stroke_name( stroke )
-            if name is None:
-                print( f"{YELLOW}mm6: unrecognized bind key (scan "
-                       f"{MAGENTA}0x{stroke.code:02x}{RESET}); cancelled{RESET}" )
-                self._mode = "idle"
-                self._swallow_up.add( src )
-                return True
-            self._commit_bind( name )
+            self._commit_bind( _bind_token( stroke ) )
             self._swallow_up.add( src )
             return True
 
@@ -496,9 +627,17 @@ class BookcastPlugin:
             name = self._stroke_name( stroke )
             if name == HEAL_KEY and self._draft_spell is not None:
                 self._draft_heal = True
+                self._draft_cursor = False
                 self._draft_target = None
                 self._swallow_up.add( src )
                 print( f"ℹ️ {GREEN}mm6{RESET}: heal target (lowest HP portrait)" )
+                return True
+            if name == CURSOR_KEY and self._draft_spell is not None:
+                self._draft_cursor = True
+                self._draft_heal = False
+                self._draft_target = None
+                self._swallow_up.add( src )
+                print( f"ℹ️ {GREEN}mm6{RESET}: cursor target (click mouse position at execute)" )
                 return True
             if src in self._draft_down:
                 self.remapper._forward( device, stroke )
@@ -518,6 +657,7 @@ class BookcastPlugin:
             return False
 
         if ( not is_up and self._ctrl and not self._alt
+             and src not in self._execute_passthrough
              and src in self._by_bind and self.remapper.window_ok() ):
             self._swallow_up.add( src )
             self._execute( self._by_bind[ src ] )
@@ -532,6 +672,8 @@ class BookcastPlugin:
         if self._mode != "idle" or self._executing:
             print( f"{YELLOW}mm6: DEFINE ignored (busy){RESET}" )
             return
+        if not self.remapper.window_ok():
+            return
         self._mode = "defining"
         self._draft_caster = None
         self._draft_book = None
@@ -539,33 +681,43 @@ class BookcastPlugin:
         self._draft_spell = None
         self._draft_target = None
         self._draft_heal = False
+        self._draft_cursor = False
         self._draft_down = set()
         print( f"ℹ️ {GREEN}mm6{RESET}: DEFINE started — press caster, book key, "
                f"click school, click spell, optional target click or {CYAN}H{RESET} "
-               f"(heal lowest HP), then {CYAN}{self._chord_label()}{RESET}" )
+               f"(heal lowest HP) or {CYAN}T{RESET} (cursor), then "
+               f"{CYAN}{self._chord_label()}{RESET}" )
 
     def _finish_define( self ):
         caster, book, school, spell = (
             self._draft_caster, self._draft_book, self._draft_school, self._draft_spell )
         target = self._draft_target
         heal = self._draft_heal
+        cursor = self._draft_cursor
         self._mode = "idle"
         if not caster or not book or not school or not spell:
             print( f"{YELLOW}mm6: DEFINE cancelled "
                    f"(need caster, book key, school click, and spell click){RESET}" )
             return
-        self._pending = ( caster, book, school, spell, target, heal )
+        self._pending = ( caster, book, school, spell, target, heal, cursor )
         self._mode = "binding"
         print( f"ℹ️ {GREEN}mm6{RESET}: DEFINE complete — press the key to bind as "
                f"{CYAN}ctrl-<key>{RESET}" )
 
     def _commit_bind( self, bind_name ):
-        caster, book, school, spell, target, heal = self._pending
+        caster, book, school, spell, target, heal, cursor = self._pending
         self._mode = "idle"
-        if heal:
+        if cursor:
             target = None
+            heal = False
+        elif heal:
+            target = None
+        prev = next( ( c for c in self.casts if c.bind == bind_name ), None )
+        label = prev.label if prev else ""
+        post_keys = prev.post_keys if prev else None
         cast = Bookcast( bind = bind_name, caster = caster, book = book,
-                         school = school, spell = spell, target = target, heal = heal )
+                         school = school, spell = spell, target = target, heal = heal,
+                         cursor = cursor, label = label, post_keys = post_keys )
         self.casts = [ c for c in self.casts if c.bind != bind_name ]
         self.casts.append( cast )
         self._rebuild_binds()
@@ -581,6 +733,16 @@ class BookcastPlugin:
         observed = get_pixel_color( marker[ "x" ], marker[ "y" ] )
         if observed is None:
             return True
+        return colors_similar( observed, marker[ "color" ], self.unselected_tolerance )
+
+    def _caster_busy( self, caster ):
+        """True when the caster readiness bubble matches the stored busy color."""
+        marker = self.busy.get( caster )
+        if marker is None:
+            return False
+        observed = get_pixel_color( marker[ "x" ], marker[ "y" ] )
+        if observed is None:
+            return False
         return colors_similar( observed, marker[ "color" ], self.unselected_tolerance )
 
     def _heal_target( self ):
@@ -610,8 +772,35 @@ class BookcastPlugin:
                f"{MAGENTA}{pcts[n]:.0f}%{RESET}" )
         return xy
 
+    def _release_held_ctrl( self ):
+        """
+        Execute starts on the bind key-down while Ctrl is still held. The capture loop is
+        blocked for the whole cast, so the physical Ctrl-up is not forwarded until afterward.
+        Lift Ctrl in the OS first or injected Esc is Ctrl+Esc (Start menu).
+        """
+        self._ctrl = False
+        self.remapper.key_up( "ctrlleft" )
+        self.remapper.key_up( "ctrlright" )
+        time.sleep( 0.02 )
+
     def _execute( self, cast ):
-        print( f"ℹ️ {GREEN}mm6{RESET}: EXECUTE ctrl-{CYAN}{cast.bind}{RESET}" )
+        if self._caster_busy( cast.caster ):
+            print( f"{YELLOW}mm6: {cast.display_label()} busy{RESET}" )
+            return
+        print( f"{cast.display_label()}" )
+        cursor_xy = None
+        restore_xy = None
+        if cast.cursor:
+            pos = get_mouse_pos()
+            cursor_xy = [ int( pos[ 0 ] ), int( pos[ 1 ] ) ]
+            print( f"ℹ️ {GREEN}mm6{RESET}: cursor {MAGENTA}{cursor_xy[0]},{cursor_xy[1]}{RESET}" )
+        elif not cast.heal and cast.target is None:
+            pos = get_mouse_pos()
+            restore_xy = [ int( pos[ 0 ] ), int( pos[ 1 ] ) ]
+        self._release_held_ctrl()
+        if cast.cursor:
+            self.remapper.tap_key( "esc" )
+            self._sleep_ms( "after_key" )
         heal_xy = None
         if cast.heal:
             heal_xy = self._heal_target()
@@ -633,10 +822,23 @@ class BookcastPlugin:
             self.remapper.move_to( cast.spell[ 0 ], cast.spell[ 1 ] )
             self._sleep_ms( "after_move" )
             self.remapper.click( "left", times = 2, interval_s = dbl, hold_s = hold )
-            target = heal_xy if cast.heal else cast.target
+            if restore_xy is not None:
+                self.remapper.move_to( restore_xy[ 0 ], restore_xy[ 1 ] )
+                self._sleep_ms( "after_move" )
+            if cast.cursor:
+                target = cursor_xy
+            elif cast.heal:
+                target = heal_xy
+            else:
+                target = cast.target
             if target is not None:
                 self.remapper.move_to( target[ 0 ], target[ 1 ] )
                 self._sleep_ms( "after_move" )
                 self.remapper.click( "left", times = 1, hold_s = hold )
+            if cast.post_keys:
+                self._sleep_ms( "after_key" )
+                for key in cast.post_keys:
+                    self.remapper.tap_key( key )
+                    self._sleep_ms( "after_key" )
         finally:
             self._executing = False

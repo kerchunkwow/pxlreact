@@ -5,7 +5,7 @@ alwaysApply: true
 ---
 
 - pxlreact's GUI layer uses DearPyGui: `pxl_statusbar.py` (in-process runtime status bar) and
-`pxl_editor.py` (separate-process profile.json editor); do not introduce tkinter or other GUI
-frameworks, and ignore any legacy notes referring to tkinter, pxl_gui.py, or pxl_guiconst.py
+`pxl_editor.py` (separate-process profile.json editor); ignore any legacy notes referring to
+pxl_gui.py or pxl_guiconst.py. Standalone side tools may use whatever toolkit suits them.
 - The core must remain fully functional headless: gui.statusbar_enabled = false in settings.toml
 disables the status bar, and no core module may import dearpygui at module level

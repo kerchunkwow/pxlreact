@@ -2,14 +2,49 @@
 # Key names match pyinterception (get_key_information): letters, "up"/"left"/"right"/"down",
 # "space", "tab", "f3", "`", etc.
 
-# Foreground-title substring; empty = always remap. Set this before using other apps that need WASD.
+# Foreground gate. Empty title/exe fall back to remapper/window.json (from capture-window.py).
+# Both empty = remaps always on (WASD etc. leak into other apps). Title is a substring match.
 target_window = ""
+target_exe = ""
 
 # Swallowed; not forwarded to the game. Do not use esc — DOS games need it.
 quit_key = "f12"
 
 # Optional capture-loop plugin (sibling module in this directory). Empty = remapper only.
 plugin = "mm6"
+
+# Optional one-shot tap sequences (not hold-through). Injected keys are not remapped or re-sequenced.
+sequence_delay_ms = 35
+
+# Pause after each cursor move and after each click when playing a recorded click sequence
+# (Ctrl+Alt+M to record, again to stop, then a key; Ctrl+that key replays). Keep low for offline play.
+click_sequence_delay_ms = 10
+
+# Ctrl+wheel (no Alt) replays each physical wheel tick this many times. 1 = off.
+ctrl_wheel_repeat = 6
+ctrl_wheel_delay_ms = 15
+
+# Alt+wheel (no Ctrl) looks. The wheel tick is swallowed. Alt is released around the taps
+# so the game sees the key rather than Alt+key. Each notch taps the key `repeat` times;
+# delay_ms is how long the key stays down and the gap before the next tap. 1 = one tap.
+# Empty string disables that direction.
+[alt_wheel]
+up = "pgdn"
+down = "del"
+repeat = 2
+delay_ms = 10
+
+# Z toggles strafe. While on, these physical keys are sent with Left Ctrl held
+# (A/D are bound to left/right, so the game sees Ctrl+Left/Right). That Ctrl is
+# released around every other key, so attack and the rest stay unmodified.
+# while_on binds apply only while strafe is on; otherwise those keys pass through.
+[strafe]
+toggle = "z"
+keys = [ "a", "d" ]
+while_on = { pgdn = "a" }
+
+[sequences]
+# f9 = [ "esc", "f9" ]
 
 [binds]
 w = "up"

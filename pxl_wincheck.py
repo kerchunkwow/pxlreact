@@ -8,14 +8,17 @@ key press or pixel reaction), avoiding stale-flag false triggers during state tr
 loading screens.
 """
 
+from pathlib import Path
 import ctypes
 
 from pxl_lib import ColorCondition
 
 _user32 = ctypes.windll.user32
+_kernel32 = ctypes.windll.kernel32
+_PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 
 
-def _foreground_title():
+def foreground_title():
     """
     Title of the foreground window via ctypes (the only thing pywin32 was used for). The buffer is
     per-call because check() runs concurrently on the poll and remapper threads.
@@ -23,6 +26,29 @@ def _foreground_title():
     buf = ctypes.create_unicode_buffer( 256 )
     _user32.GetWindowTextW( _user32.GetForegroundWindow(), buf, 256 )
     return buf.value
+
+
+_foreground_title = foreground_title
+
+
+def foreground_exe():
+    """Basename of the process that owns the foreground window, or '' if it cannot be read."""
+    hwnd = _user32.GetForegroundWindow()
+    pid = ctypes.c_ulong( 0 )
+    _user32.GetWindowThreadProcessId( hwnd, ctypes.byref( pid ) )
+    if not pid.value:
+        return ""
+    handle = _kernel32.OpenProcess( _PROCESS_QUERY_LIMITED_INFORMATION, False, pid.value )
+    if not handle:
+        return ""
+    try:
+        size = ctypes.c_ulong( 32768 )
+        buf = ctypes.create_unicode_buffer( 32768 )
+        if not _kernel32.QueryFullProcessImageNameW( handle, 0, buf, ctypes.byref( size ) ):
+            return ""
+        return Path( buf.value ).name
+    finally:
+        _kernel32.CloseHandle( handle )
 
 
 class PxlWinCheck:
