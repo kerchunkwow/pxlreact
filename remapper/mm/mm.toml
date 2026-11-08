@@ -6,11 +6,14 @@ define_key = "b"
 # Physical keys that never fire a bookcast under Ctrl (MM strafe is Ctrl+Left/Right via A/D).
 execute_passthrough = [ "a", "d" ]
 
-# SSD tolerance for the unselected-portrait color check; omit to use settings.toml color.default_tolerance.
-# unselected_tolerance = 4000
+# SSD tolerance for the selected/ready/health status checks; omit to use settings.toml color.default_tolerance.
+# status_tolerance = 4000
 
 # Healing bookcasts abort when every player is at or above this remaining-HP percent.
 heal_skip_pct = 99
+
+# Cursor-target bookcasts (T) tap Esc before opening the book, to close whatever is open.
+cursor_esc = false
 
 # Milliseconds between bookcast playback steps. Tune down until casts start failing.
 [delays_ms]
@@ -19,11 +22,42 @@ after_move = 30
 click_hold = 30
 double_click = 30
 
-# Looping bookcast (Ctrl+Shift+<key>). After each cast, wait up to busy_appear_ms for the caster's
-# busy bubble to appear, then up to ready_timeout_ms for it to clear (timeout aborts the loop).
-# fallback_wait_ms is a fixed wait used when the caster has no captured busy pixel.
+# Looping bookcast (Ctrl+Shift+<key>) casts on every captured party portrait. After each cast, wait
+# up to busy_appear_ms for the caster's ready jewel to go dark, then up to ready_timeout_ms for it to
+# light again (timeout aborts the loop). fallback_wait_ms is a fixed wait used when the caster has
+# no captured ready jewel.
 [bookcast_loop]
 poll_ms = 10
 busy_appear_ms = 1000
 ready_timeout_ms = 20000
 fallback_wait_ms = 2000
+
+# MM8 party capture (Ctrl+Alt+<key>, mm8-capture.py) rewrites mm_status.json. Capture from the
+# normal game view with every PC ready and at full health. Each element is a left-to-right run of
+# its color on its row; the Nth run is PC N and the run center is the indicator pixel. Party size
+# is the jewel/healthbar count (1-5). Only the selected PC shows an aura, so capture taps TAB once
+# per PC, waiting up to sweep_timeout_ms for the aura to move each time. Ctrl+Alt+<status_key>
+# re-reads the captured points without detecting anything: it outlines them and prints each PC's
+# current selected/ready state and health.
+[mm8_capture]
+key = "8"
+status_key = "9"
+tolerance = 0                   # SSD per pixel when matching colors; 0 = exact
+ready_y = 1411
+# Jewel center colors that all mean ready: out of combat (green, used for detection, so capture
+# out of combat), enemies near (yellow), under attack (red).
+ready_colors = [ "#7bffce", "#fffb52", "#ffb6ce" ]
+selected_y = 1203
+selected_color = "#ffffe7"      # selection aura crest
+portrait_offset_y = 200         # portrait click point below the selection aura
+sweep_timeout_ms = 500          # per-TAB wait for the aura to move
+healthbar_y_top = 1305
+healthbar_y_bottom = 1436
+healthbar_color = "#60c268"     # top pixel of a full bar
+healthbar_min_chroma = 40       # health % = share of the column with max-min channel >= this
+                                # (fill is saturated; the drained track is gray, chroma <= ~24)
+health_moderate = "#dee342"
+health_low = "#e72000"
+overlay_s = 5                   # confirmation overlay lifetime
+overlay_pad_px = 6              # rectangle padding around each detected element
+overlay_alpha = 0.35            # backdrop opacity

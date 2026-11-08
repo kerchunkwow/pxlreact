@@ -3,18 +3,20 @@ MM bookcast plugin for remapper.
 
 DEFINE records caster, book key, school click, spell click, then an optional target click,
 H (heal lowest-HP portrait), or T (cursor: click wherever the mouse is at execute time).
-BIND assigns ctrl-<key>. EXECUTE aborts if the caster readiness bubble matches the stored
-busy color. Otherwise it skips the caster key if that portrait is already selected, opens
+BIND assigns ctrl-<key>. EXECUTE aborts if the caster's ready jewel does not show the stored
+ready color. Otherwise it skips the caster key if that portrait is already selected, opens
 the book, clicks the school, double-clicks the spell, then either clicks a fixed target,
-the lowest-HP player below the skip threshold, or (cursor) Esc then the captured cursor
-position. With no target, heal, or cursor flag, the cursor is moved back to where it was
-when the bind was pressed.
+the lowest-HP player below the skip threshold, or (cursor) the captured cursor position,
+preceded by Esc when mm.toml cursor_esc is true. With no target, heal, or cursor flag, the
+cursor is moved back to where it was when the bind was pressed.
 
-Unselected portrait pixels, busy indicators, and healthbar geometry come from
-remapper/mm/mm_status.json. Loaded by remapper when plugin = "mm".
+Party size, selected/ready indicator pixels, portraits, and healthbar geometry come from
+remapper/mm/mm_status.json, which Ctrl+Alt+<[mm8_capture] key> rewrites (mm8-capture.py) and
+reloads. Loaded by remapper when plugin = "mm".
 """
 
 from dataclasses import dataclass
+from importlib import import_module
 from pathlib import Path
 import json
 import sys
@@ -23,7 +25,7 @@ import tomllib
 
 from ansi import *
 from pxl_config import get_settings
-from pxl_lib import PIXELS, colors_similar, get_mouse_pos, get_pixel_color
+from pxl_lib import PIXELS, colors_similar, get_mouse_pos, get_pixel_color, rgb_to_hex
 
 from pyinterception.src.interception.constants import KeyFlag, MouseButtonFlag
 from pyinterception.src.interception.strokes import KeyStroke, MouseStroke
@@ -131,17 +133,28 @@ def _rgb( raw ):
     return ( int( raw[ 0 ] ), int( raw[ 1 ] ), int( raw[ 2 ] ) )
 
 
-def health_pct_from( fills, x, y_top, y_bottom, tolerance ):
-    """Percent of column pixels matching any fill color from y_top through y_bottom, or None."""
+def _rgbs( raw ):
+    """One [ r, g, b ] or a list of them (ready lists every jewel color that means ready)."""
+    if isinstance( raw[ 0 ], list ):
+        return [ _rgb( c ) for c in raw ]
+    return [ _rgb( raw ) ]
+
+
+def health_pct_from( min_chroma, x, y_top, y_bottom ):
+    """
+    Percent of column pixels from y_top through y_bottom that are bar fill, or None. The fill is a
+    shaded gradient that recolors green -> yellow -> red as health drops, while the drained track
+    is a dark gray, so fill is any pixel whose max - min channel spread reaches min_chroma.
+    """
     height = y_bottom - y_top + 1
-    if height <= 0 or not fills:
+    if height <= 0:
         return None
     hits = 0
     for y in range( y_top, y_bottom + 1 ):
         observed = get_pixel_color( x, y )
         if observed is None:
             continue
-        if any( colors_similar( observed, fill, tolerance ) for fill in fills ):
+        if max( observed ) - min( observed ) >= min_chroma:
             hits += 1
     return 100.0 * hits / height
 
@@ -219,9 +232,7 @@ class BookcastPlugin:
     def __init__( self, remapper ):
         self.remapper = remapper
         self._load_config()
-        ( self.unselected, self.healthbar, self.healthbar_x,
-          self.portrait, self.busy ) = self._load_status()
-        self._register_health_pixels()
+        self._mm8, self._mm8_src, self._status_src = self._load_mm8()
         self.casts = self._load_casts()
         self._by_bind = {}
         self._rebuild_binds()
@@ -242,46 +253,143 @@ class BookcastPlugin:
         self._draft_down = set()
 
         n = len( self.casts )
-        u = len( self.unselected )
         print( f"ℹ️ {GREEN}mm{RESET}: {MAGENTA}{n}{RESET} bookcast(s); "
                f"DEFINE = {CYAN}{self._chord_label()}{RESET}" )
-        if u == 4:
-            print( f"ℹ️ {GREEN}mm{RESET}: unselected portraits loaded from "
-                   f"{CYAN}{STATUS_PATH.name}{RESET}" )
-        else:
-            print( f"{YELLOW}mm: unselected portraits missing or incomplete "
-                   f"({MAGENTA}{u}{RESET}/4); caster key will always be sent" )
-        b = len( self.busy )
-        if b == 4:
-            print( f"ℹ️ {GREEN}mm{RESET}: busy indicators loaded from {CYAN}{STATUS_PATH.name}{RESET}" )
-        else:
-            print( f"{YELLOW}mm: busy indicators missing or incomplete "
-                   f"({MAGENTA}{b}{RESET}/4); bookcasts will not check busy" )
-        if self.healthbar is not None and len( self.healthbar_x ) == 4:
-            parts = []
-            for pn in ( "1", "2", "3", "4" ):
-                pct = self.health_pct( pn )
-                parts.append( f"{CYAN}{pn}{RESET}={MAGENTA}{pct:.0f}%{RESET}" if pct is not None
-                              else f"{CYAN}{pn}{RESET}=?" )
-            nfill = len( self.healthbar[ "fill_colors" ] )
-            print( f"ℹ️ {GREEN}mm{RESET}: health " + " ".join( parts )
-                   + f"  ({MAGENTA}{nfill}{RESET} fill shade(s))" )
-            if nfill < 3:
-                print( f"{YELLOW}mm: only {MAGENTA}{nfill}{RESET} HP fill shade(s); "
-                       f"yellow/red bars need {CYAN}capture-healthbar.py{RESET} "
-                       f"with all three colors visible" )
-        else:
-            print( f"{YELLOW}mm: healthbars not loaded; run {CYAN}capture-healthbar.py{RESET}" )
-        if len( self.portrait ) == 4:
-            parts = [ f"{CYAN}{pn}{RESET}=({MAGENTA}{self.portrait[pn][0]}{RESET},"
-                      f"{MAGENTA}{self.portrait[pn][1]}{RESET})"
-                      for pn in ( "1", "2", "3", "4" ) ]
-            print( f"ℹ️ {GREEN}mm{RESET}: portrait " + " ".join( parts ) )
-        else:
-            print( f"{YELLOW}mm: portraits incomplete ({MAGENTA}{len( self.portrait )}{RESET}/4); "
-                   f"run {CYAN}capture-portrait.py{RESET}" )
+        self.reload_status()
         for cast in self.casts:
             self._print_cast( cast )
+
+    def _load_mm8( self ):
+        """
+        ( Mm8Capture, capture chord src, status chord src ) where src is ( scan, extended ), or
+        ( None, None, None ).
+        """
+        mod = import_module( ".mm8-capture", __package__ )
+        try:
+            capture = mod.Mm8Capture()
+            srcs = []
+            for name in ( capture.key, capture.status_key ):
+                key = name
+                info = _key_info( name )
+                srcs.append( ( info.scan_code, info.is_extended ) )
+        except mod.CaptureConfigError as exc:
+            print( f"{YELLOW}mm: party capture disabled ({exc}){RESET}" )
+            return None, None, None
+        except UnknownKeyError:
+            print( f"{YELLOW}mm: party capture disabled (unknown [mm8_capture] key "
+                   f"{CYAN}{key}{RESET}{YELLOW}){RESET}" )
+            return None, None, None
+        return capture, srcs[ 0 ], srcs[ 1 ]
+
+    def _recapture( self ):
+        """
+        Run the MM8 capture sweep. Physical Ctrl/Alt are still down from the chord, so lift them
+        in the OS while number keys are tapped (else the game sees Ctrl+Alt+N), then press them
+        again so the physical key-ups stay paired.
+        """
+        rm = self.remapper
+        held = list( rm._ctrl_down | rm._alt_down )
+        for ident in held:
+            rm._emit_ident( ident, True )
+        self._executing = True
+        try:
+            self._sleep_ms( "after_key" )
+            return self._mm8.capture( self._capture_tap )
+        finally:
+            for ident in held:
+                rm._emit_ident( ident, False )
+            self._executing = False
+
+    def _capture_tap( self, key ):
+        self.remapper.tap_key( key )
+
+    def _observe( self, marker ):
+        """( observed color or None, whether it matches the stored marker color )."""
+        observed = get_pixel_color( marker[ "x" ], marker[ "y" ] )
+        if observed is None:
+            return None, False
+        return observed, self._matches( observed, marker )
+
+    def _show_status( self ):
+        """
+        Outline the captured mm_status.json points and print each PC's current selected/ready
+        state and health as read from the screen now. Detects nothing and writes nothing.
+        """
+        ids = self.party_ids
+        if not ids:
+            print( f"{YELLOW}mm: no party in {CYAN}{STATUS_PATH.name}{RESET}{YELLOW}; capture with "
+                   f"{CYAN}{self._capture_label()}{RESET}" )
+            return
+        marks = []
+        bars = []
+        print( f"ℹ️ {GREEN}mm{RESET}: status of {MAGENTA}{len( ids )}{RESET} PC(s) "
+               f"from {CYAN}{STATUS_PATH.name}{RESET}" )
+        for n in ids:
+            parts = []
+            for name, on_word, off_word, tag_on, tag_off in (
+                    ( "selected", "selected", "unselected", "sel", "unsel" ),
+                    ( "ready", "ready", "busy", "rdy", "busy" ) ):
+                marker = getattr( self, name ).get( n )
+                if marker is None:
+                    parts.append( f"{YELLOW}{name} ?{RESET}" )
+                    continue
+                observed, on = self._observe( marker )
+                seen = rgb_to_hex( observed ) if observed is not None else "?"
+                parts.append( f"{on_word if on else off_word:<10} {MAGENTA}{seen}{RESET}" )
+                x, y = marker[ "x" ], marker[ "y" ]
+                marks.append( ( f"p{n} {tag_on if on else tag_off}", x, x, x, y ) )
+            por = self.portrait.get( n )
+            if por is not None:
+                marks.append( ( f"p{n} por", por[ 0 ], por[ 0 ], por[ 0 ], por[ 1 ] ) )
+            pct = self.health_pct( n )
+            if pct is None:
+                parts.append( f"{YELLOW}hp ?{RESET}" )
+            else:
+                parts.append( f"hp {MAGENTA}{pct:.0f}%{RESET}" )
+                x = self.healthbar_x[ n ]
+                bars.append( ( f"p{n} {pct:.0f}%", x, x, x ) )
+            print( f"ℹ️   {CYAN}p{n}{RESET}  " + "  ".join( parts ) )
+        if self.healthbar is not None:
+            top, bottom = self.healthbar[ "y_top" ], self.healthbar[ "y_bottom" ]
+        else:
+            top = bottom = 0
+        self._mm8.show( marks, bars, top, bottom )
+
+    def _capture_label( self ):
+        if self._mm8 is None:
+            return "[mm8_capture] in mm.toml"
+        return f"ctrl+alt+{self._mm8.key}"
+
+    def reload_status( self ):
+        """(Re)load mm_status.json, re-register its pixels, and print the party summary."""
+        ( self.selected, self.healthbar, self.healthbar_x,
+          self.portrait, self.ready, self.party_ids ) = self._load_status()
+        self._register_health_pixels()
+        self._print_status()
+
+    def _print_status( self ):
+        ids = self.party_ids
+        if not ids:
+            print( f"{YELLOW}mm: no party in {CYAN}{STATUS_PATH.name}{RESET}{YELLOW}; capture with "
+                   f"{CYAN}{self._capture_label()}{RESET}" )
+            return
+        parts = []
+        for pn in ids:
+            pct = self.health_pct( pn )
+            hp = f"{MAGENTA}{pct:.0f}%{RESET}" if pct is not None else "?"
+            xy = self.portrait.get( pn )
+            at = f" @{MAGENTA}{xy[0]},{xy[1]}{RESET}" if xy is not None else ""
+            parts.append( f"{CYAN}{pn}{RESET}={hp}{at}" )
+        print( f"ℹ️ {GREEN}mm{RESET}: party {MAGENTA}{len( ids )}{RESET}  " + "  ".join( parts ) )
+        missing = [ name for name, data in ( ( "selected", self.selected ), ( "ready", self.ready ),
+                                             ( "portrait", self.portrait ),
+                                             ( "healthbar", self.healthbar_x ) )
+                    if any( pn not in data for pn in ids ) ]
+        if self.healthbar is None and "healthbar" not in missing:
+            missing.append( "healthbar" )
+        if missing:
+            print( f"{YELLOW}mm: incomplete party data ({', '.join( missing )}); recapture with "
+                   f"{CYAN}{self._capture_label()}{RESET}" )
 
     def _chord_label( self ):
         parts = []
@@ -355,137 +463,99 @@ class BookcastPlugin:
             "double_click": float( delays.get( "double_click", 50 ) ),
         }
         self.heal_skip_pct = float( raw.get( "heal_skip_pct", 99 ) )
-        if "unselected_tolerance" in raw:
-            self.unselected_tolerance = int( raw[ "unselected_tolerance" ] )
+        self.cursor_esc = bool( raw.get( "cursor_esc", True ) )
+        if "status_tolerance" in raw:
+            self.status_tolerance = int( raw[ "status_tolerance" ] )
         else:
-            self.unselected_tolerance = get_settings()[ "color" ][ "default_tolerance" ]
+            self.status_tolerance = get_settings()[ "color" ][ "default_tolerance" ]
 
-    def _parse_unselected_entry( self, item ):
-        color = item[ "color" ]
+    def _parse_marker( self, item ):
         return {
             "x": int( item[ "x" ] ),
             "y": int( item[ "y" ] ),
-            "color": _rgb( color ),
+            "colors": _rgbs( item[ "color" ] ),
         }
 
-    def _load_unselected_file( self, path ):
-        if not path.is_file():
-            return {}
-        try:
-            raw = json.loads( path.read_text( encoding = "utf-8" ) )
-        except ( OSError, json.JSONDecodeError ) as exc:
-            print( f"{YELLOW}Warning: cannot read {CYAN}{path}{RESET} ({exc})" )
-            return {}
-        if not isinstance( raw, dict ):
-            print( f"{YELLOW}Warning: {CYAN}{path}{RESET} must be a JSON object" )
-            return {}
-        src = raw.get( "players" )
-        if not isinstance( src, dict ):
-            return {}
-        out = {}
-        for n in ( "1", "2", "3", "4" ):
-            item = src.get( n )
-            if not isinstance( item, dict ):
-                continue
-            item = item.get( "unselected" )
-            if not isinstance( item, dict ) or "color" not in item:
-                continue
-            try:
-                out[ n ] = self._parse_unselected_entry( item )
-            except ( KeyError, TypeError, ValueError, IndexError ):
-                print( f"{YELLOW}Warning: bad unselected entry {CYAN}{n}{RESET} in "
-                       f"{CYAN}{path}{RESET}" )
-        return out
+    def _matches( self, observed, marker ):
+        return any( colors_similar( observed, c, self.status_tolerance ) for c in marker[ "colors" ] )
 
     def _load_status( self ):
-        unselected = {}
+        """( selected, healthbar, healthbar_x, portrait, ready, party_ids ) from mm_status.json."""
+        selected = {}
         healthbar = None
         healthbar_x = {}
         portrait = {}
-        busy = {}
-        if STATUS_PATH.is_file():
+        ready = {}
+        ids = []
+        if not STATUS_PATH.is_file():
+            return selected, healthbar, healthbar_x, portrait, ready, ids
+        try:
+            raw = json.loads( STATUS_PATH.read_text( encoding = "utf-8" ) )
+        except ( OSError, json.JSONDecodeError ) as exc:
+            print( f"{YELLOW}Warning: cannot read {CYAN}{STATUS_PATH}{RESET} ({exc})" )
+            return selected, healthbar, healthbar_x, portrait, ready, ids
+        if not isinstance( raw, dict ):
+            print( f"{YELLOW}Warning: {CYAN}{STATUS_PATH}{RESET} must be a JSON object" )
+            return selected, healthbar, healthbar_x, portrait, ready, ids
+        players = raw.get( "players" )
+        if isinstance( players, dict ):
+            ids = sorted( ( n for n, p in players.items() if n.isdigit() and isinstance( p, dict ) ),
+                          key = int )
+        hb = raw.get( "healthbar" )
+        if isinstance( hb, dict ):
             try:
-                raw = json.loads( STATUS_PATH.read_text( encoding = "utf-8" ) )
-            except ( OSError, json.JSONDecodeError ) as exc:
-                print( f"{YELLOW}Warning: cannot read {CYAN}{STATUS_PATH}{RESET} ({exc})" )
-                raw = None
-            if isinstance( raw, dict ):
-                unselected = self._load_unselected_file( STATUS_PATH )
-                hb = raw.get( "healthbar" )
-                players = raw.get( "players" ) or {}
+                healthbar = {
+                    "fill_min_chroma": int( hb[ "fill_min_chroma" ] ),
+                    "y_top": int( hb[ "y_top" ] ),
+                    "y_bottom": int( hb[ "y_bottom" ] ),
+                    "width": int( hb[ "width" ] ),
+                }
+            except ( KeyError, TypeError, ValueError, IndexError ) as exc:
+                print( f"{YELLOW}Warning: bad healthbar data in {CYAN}{STATUS_PATH}{RESET} ({exc})" )
+        for n in ids:
+            p = players[ n ]
+            try:
+                if "healthbar_x" in p:
+                    healthbar_x[ n ] = int( p[ "healthbar_x" ] )
+                por = p.get( "portrait" )
+                if isinstance( por, dict ):
+                    portrait[ n ] = ( int( por[ "x" ] ), int( por[ "y" ] ) )
+            except ( KeyError, TypeError, ValueError ):
+                print( f"{YELLOW}Warning: bad healthbar/portrait for player {CYAN}{n}{RESET}" )
+            for name, out in ( ( "selected", selected ), ( "ready", ready ) ):
+                marker = p.get( name )
+                if not isinstance( marker, dict ):
+                    continue
                 try:
-                    fills = []
-                    raw_fills = hb.get( "fill_colors" )
-                    if isinstance( raw_fills, list ):
-                        for item in raw_fills:
-                            try:
-                                fills.append( _rgb( item ) )
-                            except ( KeyError, TypeError, ValueError, IndexError ):
-                                continue
-                    if not fills:
-                        fills = [ _rgb( hb[ "fill_color" ] ) ]
-                    healthbar = {
-                        "fill_color": fills[ 0 ],
-                        "fill_colors": fills,
-                        "y_top": int( hb[ "y_top" ] ),
-                        "y_bottom": int( hb[ "y_bottom" ] ),
-                        "width": int( hb[ "width" ] ),
-                    }
-                    for n in ( "1", "2", "3", "4" ):
-                        p = players.get( n )
-                        if isinstance( p, dict ) and "healthbar_x" in p:
-                            healthbar_x[ n ] = int( p[ "healthbar_x" ] )
-                except ( KeyError, TypeError, ValueError, IndexError ) as exc:
-                    print( f"{YELLOW}Warning: bad healthbar data in {CYAN}{STATUS_PATH}{RESET} "
-                           f"({exc})" )
-                    healthbar = None
-                    healthbar_x = {}
-                for n in ( "1", "2", "3", "4" ):
-                    p = players.get( n ) if isinstance( players, dict ) else None
-                    if not isinstance( p, dict ):
-                        continue
-                    por = p.get( "portrait" )
-                    try:
-                        if isinstance( por, dict ):
-                            portrait[ n ] = ( int( por[ "x" ] ), int( por[ "y" ] ) )
-                        elif isinstance( por, ( list, tuple ) ) and len( por ) >= 2:
-                            portrait[ n ] = ( int( por[ 0 ] ), int( por[ 1 ] ) )
-                    except ( KeyError, TypeError, ValueError, IndexError ):
-                        print( f"{YELLOW}Warning: bad portrait for player {CYAN}{n}{RESET}" )
-                    marker = p.get( "busy" )
-                    if isinstance( marker, dict ):
-                        try:
-                            busy[ n ] = self._parse_unselected_entry( marker )
-                        except ( KeyError, TypeError, ValueError, IndexError ):
-                            print( f"{YELLOW}Warning: bad busy entry {CYAN}{n}{RESET} in "
-                                   f"{CYAN}{STATUS_PATH}{RESET}" )
-        return unselected, healthbar, healthbar_x, portrait, busy
+                    out[ n ] = self._parse_marker( marker )
+                except ( KeyError, TypeError, ValueError, IndexError ):
+                    print( f"{YELLOW}Warning: bad {name} entry {CYAN}{n}{RESET} in "
+                           f"{CYAN}{STATUS_PATH}{RESET}" )
+        return selected, healthbar, healthbar_x, portrait, ready, ids
 
     def _register_health_pixels( self ):
         points = []
-        for marker in self.unselected.values():
+        for marker in self.selected.values():
             points.append( ( marker[ "x" ], marker[ "y" ] ) )
-        for marker in self.busy.values():
+        for marker in self.ready.values():
             points.append( ( marker[ "x" ], marker[ "y" ] ) )
         hb = self.healthbar
         if hb is not None:
             for x in self.healthbar_x.values():
                 for y in range( hb[ "y_top" ], hb[ "y_bottom" ] + 1 ):
                     points.append( ( x, y ) )
-        if points:
-            PIXELS.register_points( points )
+        PIXELS.register_points( points )
 
     def health_pct( self, player ):
-        """Remaining health 0-100 for player '1'-'4', or None if bars are not loaded."""
+        """Remaining health 0-100 for a party member id, or None if bars are not loaded."""
         hb = self.healthbar
         x = self.healthbar_x.get( str( player ) )
         if hb is None or x is None:
             return None
-        return health_pct_from(
-            hb[ "fill_colors" ], x, hb[ "y_top" ], hb[ "y_bottom" ], self.unselected_tolerance )
+        return health_pct_from( hb[ "fill_min_chroma" ], x, hb[ "y_top" ], hb[ "y_bottom" ] )
 
     def portrait_xy( self, player ):
-        """Clickable portrait point (x, y) for player '1'-'4', or None if not captured."""
+        """Clickable portrait point (x, y) for a party member id, or None if not captured."""
         return self.portrait.get( str( player ) )
 
     def _load_casts( self ):
@@ -611,6 +681,19 @@ class BookcastPlugin:
                 self._on_define_chord()
             return True
 
+        if ( self._mm8 is not None and src == self._mm8_src and not is_up
+             and self._ctrl and self._alt and self._mode == "idle" and not self._executing ):
+            self._swallow_up.add( src )
+            if self._recapture():
+                self.reload_status()
+            return True
+
+        if ( self._mm8 is not None and src == self._status_src and not is_up
+             and self._ctrl and self._alt and self._mode == "idle" and not self._executing ):
+            self._swallow_up.add( src )
+            self._show_status()
+            return True
+
         if self._mode == "binding":
             if is_up:
                 self.remapper._forward( device, stroke )
@@ -726,33 +809,35 @@ class BookcastPlugin:
         self._print_cast( cast )
 
     def _caster_unselected( self, caster ):
-        """True when the caster portrait matches the stored unselected color (key should be sent)."""
-        marker = self.unselected.get( caster )
+        """True unless the caster's selection aura shows the stored selected color (key should be sent)."""
+        marker = self.selected.get( caster )
         if marker is None:
             return True
         observed = get_pixel_color( marker[ "x" ], marker[ "y" ] )
         if observed is None:
             return True
-        return colors_similar( observed, marker[ "color" ], self.unselected_tolerance )
+        return not self._matches( observed, marker )
 
     def _caster_busy( self, caster ):
-        """True when the caster readiness bubble matches the stored busy color."""
-        marker = self.busy.get( caster )
+        """True when the caster's ready jewel shows none of the stored ready colors."""
+        marker = self.ready.get( caster )
         if marker is None:
             return False
         observed = get_pixel_color( marker[ "x" ], marker[ "y" ] )
         if observed is None:
             return False
-        return colors_similar( observed, marker[ "color" ], self.unselected_tolerance )
+        return not self._matches( observed, marker )
 
     def _heal_target( self ):
         """Portrait (x, y) of the lowest-HP player below heal_skip_pct, or None to abort."""
-        if len( self.portrait ) < 4:
+        ids = self.party_ids
+        have = sum( 1 for n in ids if n in self.portrait )
+        if not ids or have < len( ids ):
             print( f"{YELLOW}mm: heal aborted "
-                   f"(portraits incomplete, {MAGENTA}{len( self.portrait )}{RESET}/4){RESET}" )
+                   f"(portraits incomplete, {MAGENTA}{have}{RESET}/{len( ids )}){RESET}" )
             return None
         pcts = {}
-        for n in ( "1", "2", "3", "4" ):
+        for n in ids:
             pct = self.health_pct( n )
             if pct is None:
                 print( f"{YELLOW}mm: heal aborted (healthbars incomplete){RESET}" )
@@ -798,7 +883,7 @@ class BookcastPlugin:
             pos = get_mouse_pos()
             restore_xy = [ int( pos[ 0 ] ), int( pos[ 1 ] ) ]
         self._release_held_ctrl()
-        if cast.cursor:
+        if cast.cursor and self.cursor_esc:
             self.remapper.tap_key( "esc" )
             self._sleep_ms( "after_key" )
         heal_xy = None
@@ -811,6 +896,15 @@ class BookcastPlugin:
         dbl = self.delays[ "double_click" ] / 1000.0
         try:
             if self._caster_unselected( cast.caster ):
+                marker = self.selected.get( cast.caster )
+                if marker is None:
+                    why = "no selected marker loaded"
+                else:
+                    observed, _ = self._observe( marker )
+                    seen = rgb_to_hex( observed ) if observed is not None else "?"
+                    why = ( f"{MAGENTA}{seen}{RESET} at {MAGENTA}{marker['x']},{marker['y']}{RESET}"
+                            f", selected is {MAGENTA}{rgb_to_hex( marker['colors'][ 0 ] )}{RESET}" )
+                print( f"ℹ️ {GREEN}mm{RESET}: selecting caster {CYAN}{cast.caster}{RESET} ({why})" )
                 self.remapper.tap_key( cast.caster )
                 self._sleep_ms( "after_key" )
             self.remapper.tap_key( cast.book )

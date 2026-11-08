@@ -1,8 +1,8 @@
 """
 Standalone MM recovery monitor (busy timer).
 
-Polls each party member's readiness bubble from remapper/mm/mm_status.json. A cycle is the
-time the pixel matches the stored busy (gray) color until it does not. Prints who flipped and
+Polls each party member's ready jewel from remapper/mm/mm_status.json. A cycle is the time
+the pixel stops matching every stored ready color until it matches one again. Prints who flipped and
 the duration in tenths of a millisecond, plus a running min/mean/max for that player.
 
 Not imported by remapper or bookcast. Absent unless you run this file.
@@ -70,19 +70,19 @@ def _load_busy():
         print( f"{RED}Error: {CYAN}{STATUS_PATH}{RESET} has no players object" )
         return None
     out = {}
-    for n in ( "1", "2", "3", "4" ):
+    for n in sorted( ( k for k in players if k.isdigit() ), key = int ):
         p = players.get( n )
-        marker = p.get( "busy" ) if isinstance( p, dict ) else None
+        marker = p.get( "ready" ) if isinstance( p, dict ) else None
         if not isinstance( marker, dict ):
             continue
         try:
             out[ n ] = {
                 "x": int( marker[ "x" ] ),
                 "y": int( marker[ "y" ] ),
-                "color": _rgb( marker[ "color" ] ),
+                "colors": [ _rgb( c ) for c in marker[ "color" ] ],
             }
         except ( KeyError, TypeError, ValueError, IndexError ):
-            print( f"{YELLOW}Warning: bad busy entry {CYAN}{n}{RESET} in "
+            print( f"{YELLOW}Warning: bad ready entry {CYAN}{n}{RESET} in "
                    f"{CYAN}{STATUS_PATH}{RESET}" )
     return out
 
@@ -99,8 +99,8 @@ def _load_timer_config():
     except ( OSError, tomllib.TOMLDecodeError ) as exc:
         print( f"{YELLOW}Warning: cannot read {CYAN}{CONFIG_PATH}{RESET} ({exc})" )
         return tol, poll_ms, confirm
-    if "unselected_tolerance" in raw:
-        tol = int( raw[ "unselected_tolerance" ] )
+    if "status_tolerance" in raw:
+        tol = int( raw[ "status_tolerance" ] )
     timer = raw.get( "busy_timer" )
     if isinstance( timer, dict ):
         if "tolerance" in timer:
@@ -144,7 +144,7 @@ def _print_summary( tracks ):
 
 
 def _snapshot( markers ):
-    # Drop the cached grab so all four busy pixels share one fresh frame at `now`.
+    # Drop the cached grab so all ready pixels share one fresh frame at `now`.
     PIXELS._frame = None
     now = time.perf_counter()
     observed = {}
@@ -158,8 +158,8 @@ def main():
     if markers is None:
         return 1
     if not markers:
-        print( f"{RED}Error: no busy pixels in {CYAN}{STATUS_PATH}{RESET}; "
-               f"run {CYAN}capture-busy.py{RESET}" )
+        print( f"{RED}Error: no ready pixels in {CYAN}{STATUS_PATH}{RESET}; "
+               f"capture the party with {CYAN}ctrl+alt+8{RESET} in remapper" )
         return 1
 
     tol, poll_ms, confirm = _load_timer_config()
@@ -192,7 +192,7 @@ def main():
             tr = tracks[ n ]
             if color is None:
                 continue
-            is_busy = colors_similar( color, marker[ "color" ], tol )
+            is_busy = not any( colors_similar( color, c, tol ) for c in marker[ "colors" ] )
             if tr[ "busy" ] is None:
                 tr[ "busy" ] = is_busy
                 state = f"{YELLOW}busy{RESET}" if is_busy else f"{GREEN}ready{RESET}"

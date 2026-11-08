@@ -103,6 +103,51 @@ class PixelSource:
             return None
         return raw[ 2 ], raw[ 1 ], raw[ 0 ]
 
+    def grab_region( self, left, top, width, height ):
+        """
+        One-shot RGB grid as a list of rows of (r, g, b) tuples.
+
+        Clamps to the virtual desktop and does not use or update the registered frame cache, so
+        callers (magnifiers, discovery tools) can grab an arbitrary neighborhood without disturbing
+        the poll-loop region. Returns ( left, top, rows ) after clamping, or None on failure.
+        """
+        vs_l, vs_t, vs_w, vs_h = virtual_screen()
+        left, top, width, height = int( left ), int( top ), int( width ), int( height )
+        if left < vs_l:
+            width -= vs_l - left
+            left = vs_l
+        if top < vs_t:
+            height -= vs_t - top
+            top = vs_t
+        right = vs_l + vs_w
+        bottom = vs_t + vs_h
+        if left + width > right:
+            width = right - left
+        if top + height > bottom:
+            height = bottom - top
+        if width < 1 or height < 1:
+            return None
+        try:
+            shot = self._sct().grab( { 'left': left, 'top': top, 'width': width, 'height': height } )
+        except Exception:
+            print( f'{MAGENTA}\tbad grab for region ({YELLOW}{left}{RESET}, {YELLOW}{top}{RESET}) '
+                   f'{YELLOW}{width}{RESET}x{YELLOW}{height}{RESET}' )
+            return None
+        raw = shot.raw
+        sw = shot.width
+        sh = shot.height
+        use_w = min( sw, width )
+        use_h = min( sh, height )
+        rows = []
+        for y in range( use_h ):
+            base = y * sw * 4
+            row = []
+            for x in range( use_w ):
+                off = base + x * 4
+                row.append( ( raw[ off + 2 ], raw[ off + 1 ], raw[ off ] ) )
+            rows.append( row )
+        return left, top, rows
+
 
 # Module-level singleton: every consumer reads through this, so the app can register its
 # configured points once and all callers share the per-tick frame.
@@ -225,6 +270,24 @@ def get_mouse_pos():
     """
     ctypes.windll.user32.GetCursorPos( ctypes.byref( WPT ) )
     return WPT.x, WPT.y
+
+def virtual_screen():
+    """
+    Virtual desktop origin and size (the union of all monitors).
+
+    Returns:
+        tuple[int, int, int, int]: ( left, top, width, height ). Origin may be negative.
+    """
+    user32 = ctypes.windll.user32
+    left = user32.GetSystemMetrics( 76 )    # SM_XVIRTUALSCREEN
+    top = user32.GetSystemMetrics( 77 )     # SM_YVIRTUALSCREEN
+    width = user32.GetSystemMetrics( 78 )   # SM_CXVIRTUALSCREEN
+    height = user32.GetSystemMetrics( 79 )  # SM_CYVIRTUALSCREEN
+    if width <= 0 or height <= 0:
+        width = user32.GetSystemMetrics( 0 ) or 2560
+        height = user32.GetSystemMetrics( 1 ) or 1440
+        left, top = 0, 0
+    return left, top, width, height
 
 def rgb_to_hex( rgb ):
     """Convert an RGB tuple to a hexadecimal color."""

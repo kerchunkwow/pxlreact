@@ -12,8 +12,8 @@ a key to a one-shot tap list (injected keys are not remapped or re-sequenced).
 
 Ctrl+Alt+M records a click sequence: left/right clicks are stored with cursor position, a second
 Ctrl+Alt+M waits for a bind key, and Ctrl+that key replays move+click via Interception. Saved next
-to the remap TOML as click_sequences.json. Ctrl+Alt+C prints the pixel under the cursor
-as a truecolor chip plus the hue name and hex in that color.
+to the remap TOML as click_sequences.json. Ctrl+Alt+C opens the pixel inspector (magnified region
+around the cursor); Esc closes it, right-click outside freezes, right-click a cell copies JSON.
 Ctrl+wheel (no Alt) repeats the wheel tick `ctrl_wheel_repeat` times so MM fly climbs/descends faster.
 Alt+wheel (no Ctrl) taps the keys in [alt_wheel] (MM look: wheel up = PgDn, wheel down = Del).
 Each notch is repeated `repeat` times, spaced by `delay_ms`, and the wheel tick is not forwarded.
@@ -26,6 +26,7 @@ Usage (from the repo root, venv active):
 """
 
 from pathlib import Path
+import importlib.util
 import json
 import random
 import sys
@@ -39,7 +40,7 @@ if str( HERE ) not in sys.path:
     sys.path.insert( 0, str( HERE ) )
 
 from pxl_config import get_settings
-from pxl_lib import color_name, get_mouse_pos, get_pixel_color, rgb_to_hex
+from pxl_lib import get_mouse_pos
 from pxl_wincheck import foreground_exe, foreground_title
 
 # Populate the settings cache from the repo root before pxl_intercept's import-time lookup
@@ -247,6 +248,55 @@ def _parse_strafe( raw, quit_info, binds ):
     return toggle, strafe_keys, toggle_name, names, while_on, while_names
 
 
+def _load_pixel_inspector():
+    path = HERE / "pixel-inspector.py"
+    spec = importlib.util.spec_from_file_location( "pixel_inspector", path )
+    if spec is None or spec.loader is None:
+        print( f"{RED}Error: cannot load {CYAN}{path}{RESET}" )
+        return None
+    mod = importlib.util.module_from_spec( spec )
+    try:
+        spec.loader.exec_module( mod )
+    except Exception as exc:
+        print( f"{RED}Error: pixel inspector failed to import ({exc}){RESET}" )
+        return None
+    return mod
+
+
+def _parse_equip( raw, quit_info, binds, sequences, strafe_toggle ):
+    """Return { name, src, xy } from optional [equip], or None when absent or key is empty."""
+    cfg = raw.get( "equip" )
+    if not cfg:
+        return None
+    if not isinstance( cfg, dict ):
+        print( f"{RED}Error: equip must be a table{RESET}" )
+        sys.exit( 1 )
+    name = cfg.get( "key" ) or ""
+    if not isinstance( name, str ):
+        print( f"{RED}Error: equip.key must be a key name{RESET}" )
+        sys.exit( 1 )
+    name = name.strip().lower()
+    if not name:
+        return None
+    try:
+        info = _key_info( name )
+    except UnknownKeyError:
+        print( f"{RED}Error: unknown equip.key {CYAN}{name}{RESET}" )
+        sys.exit( 1 )
+    src = ( info.scan_code, info.is_extended )
+    if ( src == ( quit_info.scan_code, quit_info.is_extended ) or src in binds
+         or src in sequences or src == strafe_toggle ):
+        print( f"{RED}Error: equip.key {CYAN}{name}{RESET} collides with quit_key, a [binds] "
+               f"or [sequences] entry, or the strafe toggle{RESET}" )
+        sys.exit( 1 )
+    try:
+        xy = ( int( cfg[ "x" ] ), int( cfg[ "y" ] ) )
+    except ( KeyError, TypeError, ValueError ):
+        print( f"{RED}Error: equip.x and equip.y must be integers{RESET}" )
+        sys.exit( 1 )
+    return { "name": name, "src": src, "xy": xy }
+
+
 def load_config( path ):
     """
     Load remap.toml.
@@ -255,7 +305,7 @@ def load_config( path ):
               plugin_name, sequences, seq_rows, sequence_delay_ms, click_sequence_delay_ms,
               ctrl_wheel_repeat, ctrl_wheel_delay_ms, alt_wheel_up, alt_wheel_down,
               alt_wheel_repeat, alt_wheel_delay_ms, strafe_toggle, strafe_keys, strafe_toggle_name, strafe_key_names,
-              strafe_while, strafe_while_names ).
+              strafe_while, strafe_while_names, equip ).
     `binds` maps ( scan_code, is_extended ) -> dest KeyData.
     `sequences` maps ( scan_code, is_extended ) -> list of dest KeyData.
     `bind_rows` is an ordered list of ( src_name, dest_name, src_info, dest_info ) for logging.
@@ -379,27 +429,14 @@ def load_config( path ):
     alt_wheel_up, alt_wheel_down, alt_wheel_repeat, alt_wheel_delay_ms = _parse_alt_wheel( raw )
     strafe_toggle, strafe_keys, strafe_toggle_name, strafe_key_names, strafe_while, strafe_while_names = _parse_strafe(
         raw, quit_info, binds )
+    equip = _parse_equip( raw, quit_info, binds, sequences, strafe_toggle )
 
     return ( target_window, target_exe, quit_name.strip().lower(), quit_info, binds, bind_rows,
              plugin_name, sequences, seq_rows, sequence_delay_ms, click_sequence_delay_ms,
              ctrl_wheel_repeat, ctrl_wheel_delay_ms, alt_wheel_up, alt_wheel_down,
              alt_wheel_repeat, alt_wheel_delay_ms,
              strafe_toggle, strafe_keys, strafe_toggle_name, strafe_key_names,
-             strafe_while, strafe_while_names )
-
-
-def _print_probe( x, y, rgb ):
-    """Truecolor chip of the sampled pixel, with the hue name and hex printed in that color."""
-    r, g, b = ( int( c ) for c in rgb[ :3 ] )
-    ink = fg_rgb( r, g, b )
-    fill = f"{bg_rgb( r, g, b )}{' ' * 8}{RESET}"
-    info = ( f"({MAGENTA}{x}{RESET}, {MAGENTA}{y}{RESET})  "
-             f"{ink}{color_name( ( r, g, b ) )}{RESET}  "
-             f"({MAGENTA}{r:>3}{RESET}, {MAGENTA}{g:>3}{RESET}, {MAGENTA}{b:>3}{RESET})  "
-             f"{ink}{rgb_to_hex( ( r, g, b ) )}{RESET}" )
-    print( f"┌{'─' * 8}┐" )
-    print( f"│{fill}│  {info}" )
-    print( f"└{'─' * 8}┘" )
+             strafe_while, strafe_while_names, equip )
 
 
 class Remapper:
@@ -416,7 +453,7 @@ class Remapper:
                   alt_wheel_repeat = 6, alt_wheel_delay_ms = 15,
                   strafe_toggle = None, strafe_keys = None,
                   strafe_toggle_name = "", strafe_key_names = None, strafe_while = None,
-                  strafe_while_names = None ):
+                  strafe_while_names = None, inspector_pos_path = None, equip = None ):
         settings = get_settings()
         self.AWAIT_TIMEOUT_MS = settings[ "remapper" ][ "await_timeout_ms" ]
         self.MIN_HOLD = settings[ "remapper" ][ "min_hold" ]
@@ -460,8 +497,14 @@ class Remapper:
         self._synth_ctrl = False
         self._bracket_depth = 0
         self._bracket_lifted = False
-        self._record_key = _key_info( "m" )
+        self._record_key = _key_info( "0" )
         self._probe = _key_info( "c" )
+        self._esc = _key_info( "esc" )
+        self._inspector_pos_path = Path( inspector_pos_path ) if inspector_pos_path else HERE / "pixel_inspector.json"
+        self._inspector_mod = None
+        self._inspector = None
+        self._inspector_rbtn = False
+        self._inspector_esc = False
         self._chord_swallow = set()
         self._seq_down = set()
         self._click_mode = "idle"
@@ -469,6 +512,8 @@ class Remapper:
         self._click_seqs = {}
         self._click_seq_down = set()
         self._click_playing = False
+        self._equip = equip
+        self._equip_down = False
         # Source ( scan, extended ) currently held as a remapped dest; used so a mid-hold alt-tab
         # still releases the destination key instead of leaving it stuck.
         self._held = {}
@@ -560,14 +605,37 @@ class Remapper:
         return ( stroke.code == self._probe.scan_code
                  and bool( stroke.flags & KeyFlag.KEY_E0 ) == self._probe.is_extended )
 
-    def _report_mouse( self ):
-        x, y = get_mouse_pos()
-        color = get_pixel_color( x, y )
-        if color is None:
-            print( f"{RED}Error: Could not read pixel at "
-                   f"({MAGENTA}{x}{RESET}, {MAGENTA}{y}{RESET}){RESET}" )
+    def _is_esc( self, stroke ):
+        return ( stroke.code == self._esc.scan_code
+                 and bool( stroke.flags & KeyFlag.KEY_E0 ) == self._esc.is_extended )
+
+    def _inspector_running( self ):
+        return self._inspector is not None and self._inspector.active
+
+    def _inspector_toggle( self ):
+        if self._inspector_running():
+            self._inspector.stop()
             return
-        _print_probe( x, y, color )
+        if self._inspector_mod is None:
+            self._inspector_mod = _load_pixel_inspector()
+            if self._inspector_mod is None:
+                return
+        self._inspector = self._inspector_mod.PixelInspector(
+            pos_path = self._inspector_pos_path, owned_input = True )
+        self._inspector.start()
+
+    def _inspector_mouse( self, stroke ):
+        """Swallow right-clicks while the inspector is up (and the matching up after it closes)."""
+        down = bool( stroke.button_flags & MouseButtonFlag.MOUSE_RIGHT_BUTTON_DOWN )
+        up = bool( stroke.button_flags & MouseButtonFlag.MOUSE_RIGHT_BUTTON_UP )
+        if down and self._inspector_running():
+            self._inspector.handle_right_click()
+            self._inspector_rbtn = True
+            return True
+        if up and self._inspector_rbtn:
+            self._inspector_rbtn = False
+            return True
+        return False
 
     def _load_click_seqs( self ):
         path = self._click_seqs_path
@@ -701,6 +769,28 @@ class Remapper:
                 if delay > 0:
                     time.sleep( delay )
         finally:
+            self._click_playing = False
+
+    def _run_equip( self ):
+        """Click under the cursor, click the equip point, then return the cursor to its start."""
+        delay = self.click_sequence_delay_s
+        hold = delay if delay > 0 else 0.01
+        start = get_mouse_pos()
+        x, y = self._equip[ "xy" ]
+        self._click_playing = True
+        try:
+            self.move_to( start[ 0 ], start[ 1 ] )
+            self.click( "left", times = 1, hold_s = hold )
+            if delay > 0:
+                time.sleep( delay )
+            self.move_to( x, y )
+            if delay > 0:
+                time.sleep( delay )
+            self.click( "left", times = 1, hold_s = hold )
+            if delay > 0:
+                time.sleep( delay )
+        finally:
+            self.move_to( start[ 0 ], start[ 1 ] )
             self._click_playing = False
 
     def _emit( self, device, code, flags ):
@@ -871,7 +961,7 @@ class Remapper:
         print( f"ℹ️ {GREEN}Remapper{RESET}: {gate}; "
                f"quit = {CYAN}{self._quit_name}{RESET}; "
                f"record = {CYAN}ctrl+alt+m{RESET}; "
-               f"probe = {CYAN}ctrl+alt+c{RESET}{wheel}{look}{strafe}{extra}" )
+               f"inspect = {CYAN}ctrl+alt+c{RESET}{wheel}{look}{strafe}{extra}" )
         try:
             self._loop()
         finally:
@@ -984,6 +1074,8 @@ class Remapper:
                 continue
 
             if isinstance( stroke, MouseStroke ):
+                if self._inspector_mouse( stroke ):
+                    continue
                 if self._remap_alt_wheel( stroke ):
                     continue
                 if self._boost_ctrl_wheel( device, stroke ):
@@ -1029,6 +1121,16 @@ class Remapper:
                     self._stop = True
                 continue
 
+            if self._is_esc( stroke ):
+                if not is_up and self._inspector_running():
+                    self._inspector.stop()
+                    self._inspector_esc = True
+                    continue
+                if self._inspector_esc:
+                    if is_up:
+                        self._inspector_esc = False
+                    continue
+
             if src in self._chord_swallow:
                 if is_up:
                     self._chord_swallow.discard( src )
@@ -1036,7 +1138,7 @@ class Remapper:
 
             if not is_up and self._ctrl and self._alt and self._is_probe( stroke ):
                 self._chord_swallow.add( src )
-                self._report_mouse()
+                self._inspector_toggle()
                 continue
 
             if not is_up and self._ctrl and self._alt and self._is_record_key( stroke ):
@@ -1113,6 +1215,22 @@ class Remapper:
                 self._with_bracket( lambda: self._run_click_seq( clicks[ "clicks" ] ) )
                 continue
 
+            if self._equip is not None and src == self._equip[ "src" ]:
+                if is_up:
+                    if self._equip_down:
+                        self._equip_down = False
+                        continue
+                    self._with_bracket( lambda: self._forward( device, stroke ) )
+                    continue
+                if self._equip_down:
+                    continue
+                if not self._window_ok() or self._alt or self._ctrl or self._click_playing:
+                    self._with_bracket( lambda: self._forward( device, stroke ) )
+                    continue
+                self._equip_down = True
+                self._with_bracket( self._run_equip )
+                continue
+
             seq = self.sequences.get( src )
             if seq is not None:
                 if is_up:
@@ -1178,6 +1296,9 @@ class Remapper:
             return
         self._destroyed = True
         print( f"ℹ️ {YELLOW}Closing Remapper...{RESET}" )
+        if self._inspector is not None:
+            self._inspector.stop()
+            self._inspector.join( timeout = 2.0 )
         self._release_synth_ctrl()
         try:
             self.ctx.destroy()
@@ -1196,7 +1317,7 @@ def main():
       ctrl_wheel_repeat, ctrl_wheel_delay_ms, alt_wheel_up, alt_wheel_down,
       alt_wheel_repeat, alt_wheel_delay_ms,
       strafe_toggle, strafe_keys, strafe_toggle_name, strafe_key_names,
-      strafe_while, strafe_while_names ) = load_config( cfg_path )
+      strafe_while, strafe_while_names, equip ) = load_config( cfg_path )
     print( f"ℹ️ {GREEN}Remapper{RESET}: loaded {CYAN}{cfg_path}{RESET}" )
     for src_name, dest_name, src_info, dest_info in bind_rows:
         print( f"ℹ️   {CYAN}{src_name}{RESET} (scan {MAGENTA}0x{src_info.scan_code:02x}{RESET}) -> "
@@ -1205,6 +1326,9 @@ def main():
         chain = " -> ".join( dest_names )
         print( f"ℹ️   {CYAN}{src_name}{RESET} sequence {CYAN}{chain}{RESET} "
                f"({MAGENTA}{sequence_delay_ms:.0f}{RESET} ms)" )
+    if equip is not None:
+        print( f"ℹ️   {CYAN}{equip[ 'name' ]}{RESET} equip -> click here, "
+               f"{MAGENTA}{equip[ 'xy' ][ 0 ]},{equip[ 'xy' ][ 1 ]}{RESET}, return" )
 
     remapper = Remapper( target_window, quit_name, quit_info, binds, plugin_name = plugin_name,
                          target_exe = target_exe, sequences = sequences,
@@ -1220,7 +1344,9 @@ def main():
                          strafe_toggle_name = strafe_toggle_name,
                          strafe_key_names = strafe_key_names,
                          strafe_while = strafe_while,
-                         strafe_while_names = strafe_while_names )
+                         strafe_while_names = strafe_while_names,
+                         inspector_pos_path = cfg_path.parent / "pixel_inspector.json",
+                         equip = equip )
     try:
         remapper.run()
     except KeyboardInterrupt:

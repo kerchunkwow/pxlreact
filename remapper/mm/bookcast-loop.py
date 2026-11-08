@@ -2,9 +2,9 @@
 MM looping bookcast (all-party buff) for remapper.
 
 Extends BookcastPlugin: every bookcast keeps its ctrl-<key> behavior, and ctrl+shift-<key>
-casts the same caster/book/school/spell once on each party portrait listed in the remap TOML
-`party_portraits`, ignoring the bookcast's own target/heal/cursor/post_keys. Between casts it
-waits for the caster's busy bubble to appear and then clear (mm.toml [bookcast_loop]).
+casts the same caster/book/school/spell once on each captured party portrait (mm_status.json),
+ignoring the bookcast's own target/heal/cursor/post_keys. Between casts it waits for the caster's
+ready jewel to go dark and then light again (mm.toml [bookcast_loop]).
 
 The cast blocks the capture loop, so pending input is drained between steps: Esc (or the
 remapper quit key) aborts the loop, closing the spellbook/targeting if a cast is mid-flight.
@@ -12,8 +12,6 @@ Modifier and key-up strokes are passed on so nothing sticks; other key-downs, mo
 and button-downs are dropped while the loop runs.
 """
 
-from pathlib import Path
-import sys
 import time
 import tomllib
 
@@ -25,8 +23,6 @@ from pyinterception.src.interception.strokes import KeyStroke, MouseStroke
 from .bookcast import (
     ALT_SCANS, CONFIG_PATH, CTRL_SCANS, SHIFT_SCANS, BookcastPlugin, _key_info,
 )
-
-REMAPPER_DIR = Path( __file__ ).resolve().parent.parent
 
 _MOUSE_UP_MASK = (
     MouseButtonFlag.MOUSE_LEFT_BUTTON_UP
@@ -41,12 +37,6 @@ class _LoopAbort( Exception ):
     pass
 
 
-def _remap_toml_path():
-    if len( sys.argv ) > 1:
-        return Path( sys.argv[ 1 ] ).expanduser().resolve()
-    return REMAPPER_DIR / "remap.toml"
-
-
 class BookcastLoopPlugin( BookcastPlugin ):
 
     def __init__( self, remapper ):
@@ -55,34 +45,14 @@ class BookcastLoopPlugin( BookcastPlugin ):
         self._abort = None
         self._ui_open = False
         self._esc = _key_info( "esc" )
-        self.party = self._load_party()
         self._load_loop_config()
-        if self.party:
-            print( f"ℹ️ {GREEN}mm loop{RESET}: {MAGENTA}{len( self.party )}{RESET} party portrait(s); "
-                   f"{CYAN}ctrl+shift-<key>{RESET} loops a bookcast, {CYAN}esc{RESET} aborts" )
-        else:
-            print( f"{YELLOW}mm loop: no party_portraits in {CYAN}{_remap_toml_path().name}{RESET}"
-                   f"{YELLOW}; looping disabled{RESET}" )
+        print( f"ℹ️ {GREEN}mm loop{RESET}: {CYAN}ctrl+shift-<key>{RESET} loops a bookcast over "
+               f"captured portraits, {CYAN}esc{RESET} aborts" )
 
-    def _load_party( self ):
-        path = _remap_toml_path()
-        try:
-            with open( path, "rb" ) as fh:
-                raw = tomllib.load( fh )
-        except ( OSError, tomllib.TOMLDecodeError ) as exc:
-            print( f"{YELLOW}Warning: cannot read {CYAN}{path}{RESET} ({exc})" )
-            return []
-        items = raw.get( "party_portraits" ) or []
-        if not isinstance( items, list ):
-            print( f"{YELLOW}Warning: party_portraits must be a list of [ x, y ]{RESET}" )
-            return []
-        party = []
-        for i, item in enumerate( items, 1 ):
-            try:
-                party.append( ( int( item[ 0 ] ), int( item[ 1 ] ) ) )
-            except ( TypeError, ValueError, IndexError ):
-                print( f"{YELLOW}Warning: bad party_portraits entry {MAGENTA}{i}{RESET}" )
-        return party
+    @property
+    def party( self ):
+        """Captured portrait click points in party order."""
+        return [ self.portrait[ n ] for n in self.party_ids if n in self.portrait ]
 
     def _load_loop_config( self ):
         try:
@@ -229,8 +199,8 @@ class BookcastLoopPlugin( BookcastPlugin ):
         self._ui_open = False
 
     def _wait_ready( self, caster ):
-        if caster not in self.busy:
-            print( f"ℹ️ {GREEN}mm loop{RESET}: no busy pixel for {CYAN}{caster}{RESET}; "
+        if caster not in self.ready:
+            print( f"ℹ️ {GREEN}mm loop{RESET}: no ready jewel for {CYAN}{caster}{RESET}; "
                    f"waiting {MAGENTA}{self.loop_fallback_s * 1000:.0f}{RESET} ms" )
             self._sleep_checked( self.loop_fallback_s )
             return

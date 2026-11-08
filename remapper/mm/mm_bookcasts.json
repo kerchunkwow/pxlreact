@@ -1,80 +1,15 @@
 [
   {
-    "bind": "b",
+    "bind": "i",
     "caster": "4",
     "book": "c",
     "school": [
-      1889,
-      658
+      1892,
+      1036
     ],
     "spell": [
-      1246,
-      1016
-    ]
-  },
-  {
-    "bind": "h",
-    "caster": "4",
-    "book": "c",
-    "school": [
-      1910,
-      905
-    ],
-    "spell": [
-      1049,
-      765
-    ]
-  },
-  {
-    "bind": "p",
-    "caster": "4",
-    "book": "c",
-    "school": [
-      1876,
-      892
-    ],
-    "spell": [
-      1645,
-      1006
-    ]
-  },
-  {
-    "bind": "r",
-    "caster": "4",
-    "book": "c",
-    "school": [
-      1877,
-      896
-    ],
-    "spell": [
-      720,
-      678
-    ]
-  },
-  {
-    "bind": "sc53e0",
-    "caster": "4",
-    "book": "c",
-    "school": [
-      1882,
-      898
-    ],
-    "spell": [
-      1595,
-      673
-    ]
-  },
-  {
-    "bind": "sc51e0",
-    "caster": "4",
-    "book": "c",
-    "school": [
-      1885,
-      897
-    ],
-    "spell": [
-      738,
-      327
+      1066,
+      624
     ]
   },
   {
@@ -82,12 +17,225 @@
     "caster": "4",
     "book": "c",
     "school": [
-      1898,
-      659
+      1885,
+      1032
     ],
     "spell": [
-      707,
-      338
+      1652,
+      668
+    ]
+  },
+  {
+    "bind": "p",
+    "caster": "4",
+    "book": "c",
+    "school": [
+      1899,
+      1039
+    ],
+    "spell": [
+      1650,
+      300
+    ]
+  },
+  {
+    "bind": "sc4fe0",
+    "caster": "4",
+    "book": "c",
+    "school": [
+      1890,
+      783
+    ],
+    "spell": [
+      746,
+      662
+    ],
+    "cursor": true
+  },
+  {
+    "bind": "e",
+    "caster": "4",
+    "book": "c",
+    "school": [
+      1890,
+      1028
+    ],
+    "spell": [
+      699,
+      561
+    ]
+  },
+  {
+    "bind": "m",
+    "caster": "4",
+    "book": "c",
+    "school": [
+      1894,
+      902
+    ],
+    "spell": [
+      1233,
+      1017
+    ]
+  },
+  {
+    "bind": "d",
+    "caster": "4",
+    "book": "c",
+    "school": [
+      1900,
+      662
+    ],
+    "spell": [
+      760,
+      680
+    ]
+  },
+  {
+    "bind": "k",
+    "caster": "4",
+    "book": "c",
+    "school": [
+      1900,
+      657
+    ],
+    "spell": [
+      769,
+      671
+    ]
+  },
+  {
+    "bind": "h",
+    "caster": "5",
+    "book": "c",
+    "school": [
+      2172,
+      769
+    ],
+    "spell": [
+      1040,
+      738
+    ],
+    "heal": true
+  },
+  {
+    "bind": "sc51e0",
+    "caster": "5",
+    "book": "c",
+    "school": [
+      2161,
+      761
+    ],
+    "spell": [
+      1051,
+      337
+    ],
+    "cursor": true
+  },
+  {
+    "bind": "sc53e0",
+    "caster": "5",
+    "book": "c",
+    "school": [
+      2171,
+      771
+    ],
+    "spell": [
+      1822,
+      250
+    ],
+    "cursor": true
+  },
+  {
+    "bind": "b",
+    "caster": "5",
+    "book": "c",
+    "school": [
+      2167,
+      520
+    ],
+    "spell": [
+      1035,
+      326
+    ],
+    "cursor": true
+  },
+  {
+    "bind": "l",
+    "caster": "3",
+    "book": "c",
+    "school": [
+      2179,
+      59
+    ],
+    "spell": [
+      1534,
+      1172
+    ]
+  },
+  {
+    "bind": "w",
+    "caster": "2",
+    "book": "c",
+    "school": [
+      2173,
+      176
+    ],
+    "spell": [
+      639,
+      592
+    ]
+  },
+  {
+    "bind": "j",
+    "caster": "2",
+    "book": "c",
+    "school": [
+      2175,
+      294
+    ],
+    "spell": [
+      1477,
+      548
+    ]
+  },
+  {
+    "bind": "v",
+    "caster": "2",
+    "book": "c",
+    "school": [
+      2164,
+      1002
+    ],
+    "spell": [
+      1894,
+      1128
+    ]
+  },
+  {
+    "bind": "f",
+    "caster": "4",
+    "book": "c",
+    "school": [
+      2165,
+      1358
+    ],
+    "spell": [
+      1689,
+      1123
+    ]
+  },
+  {
+    "bind": "r",
+    "caster": "5",
+    "book": "c",
+    "school": [
+      2169,
+      758
+    ],
+    "spell": [
+      933,
+      1273
     ]
   }
 ]

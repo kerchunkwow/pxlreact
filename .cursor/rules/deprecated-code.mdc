@@ -1,0 +1,18 @@
+---
+description: Superseded tools and modules are relocated to deprecated/, never left in place
+alwaysApply: true
+---
+
+- When a change supersedes a script, module, tool, or data/spec file (its job is now done by
+  something else, or it reads/writes a format that no longer exists), move it to the root
+  `deprecated/` folder in that same change. Flat layout; use `git mv` for tracked files.
+- Never leave superseded files in place with "unused", "legacy", or "do not run" notes, and never
+  ask the user to remember which files are orphaned. Finishing a replacement includes clearing
+  out what it replaced.
+- Before moving, search the live tree for references (imports, usage strings, docs) and remove or
+  update them; nothing outside `deprecated/` may depend on a deprecated file.
+- Name every relocated file in chat when reporting the change.
+- `deprecated/` and `pxlreact1_archive/` are dead code: do not read, search, run, import, modify,
+  or take conventions from them unless the user explicitly asks. Exclude them from searches.
+- Throwaway probe/diagnostic scripts made during a task are deleted (not deprecated) before the
+  task is reported complete.

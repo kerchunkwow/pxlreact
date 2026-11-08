@@ -13,9 +13,6 @@ quit_key = "f12"
 # Optional capture-loop plugin (sibling module in this directory). Empty = remapper only.
 plugin = "mm"
 
-# Party portrait click points [ x, y ], PC1 first. Ctrl+Shift+<bookcast key> casts on each in order.
-party_portraits = [ [ 827, 1293 ], [ 1127, 1293 ], [ 1427, 1293 ], [ 1727, 1293 ] ]
-
 # Optional one-shot tap sequences (not hold-through). Injected keys are not remapped or re-sequenced.
 sequence_delay_ms = 35
 
@@ -26,6 +23,14 @@ click_sequence_delay_ms = 10
 # Ctrl+wheel (no Alt) replays each physical wheel tick this many times. 1 = off.
 ctrl_wheel_repeat = 6
 ctrl_wheel_delay_ms = 15
+
+# Equip: key clicks where the mouse is (pick up the item), clicks (x, y), then returns the cursor
+# to where it started. Steps are spaced by click_sequence_delay_ms. Fires only in the game window
+# with no Ctrl/Alt held; otherwise the key passes through. Empty key disables it.
+[equip]
+key = "q"
+x = 2012
+y = 330
 
 # Alt+wheel (no Ctrl) looks. The wheel tick is swallowed. Alt is released around the taps
 # so the game sees the key rather than Alt+key. Each notch taps the key `repeat` times;
@@ -48,6 +53,8 @@ while_on = { pgdn = "a" }
 
 [sequences]
 # f9 = [ "esc", "f9" ]
+# f = ["a", "space"]
+r = ["space", "tab", "space", "tab", "space", "tab"]
 
 [binds]
 w = "up"
@@ -55,7 +62,7 @@ a = "left"
 d = "right"
 s = "down"
 f = "a"
-r = "s"
+# r = "s"
 e = "space"
 space = "x"
 c = "`"
