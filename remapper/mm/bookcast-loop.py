@@ -1,10 +1,16 @@
 """
-MM looping bookcast (all-party buff) for remapper.
+MM looping bookcast (all-party buff & healing loop) for remapper.
 
 Extends BookcastPlugin: every bookcast keeps its ctrl-<key> behavior, and ctrl+shift-<key>
-casts the same caster/book/school/spell once on each captured party portrait (mm_status.json),
-ignoring the bookcast's own target/heal/cursor/post_keys. Between casts it waits for the caster's
-ready jewel to go dark and then light again (mm.toml [bookcast_loop]).
+loops the cast:
+- For healing bookcasts (cast.heal is True), it enters a toggleable healing loop that waits
+  for the caster to be ready, casts on the lowest-health party member below heal_skip_pct,
+  and repeats until no party member needs healing or ctrl+shift-<key> (or Esc) is pressed.
+- For all other bookcasts, it casts once on each captured party portrait (mm_status.json),
+  ignoring the bookcast's own target/cursor/post_keys.
+
+Between casts it waits for the caster's ready jewel to go dark and then light again
+(mm.toml [bookcast_loop]).
 
 The cast blocks the capture loop, so pending input is drained between steps: Esc (or the
 remapper quit key) aborts the loop, closing the spellbook/targeting if a cast is mid-flight.
@@ -43,11 +49,12 @@ class BookcastLoopPlugin( BookcastPlugin ):
         super().__init__( remapper )
         self._shift = False
         self._abort = None
+        self._toggle_src = None
         self._ui_open = False
         self._esc = _key_info( "esc" )
         self._load_loop_config()
         print( f"ℹ️ {GREEN}mm loop{RESET}: {CYAN}ctrl+shift-<key>{RESET} loops a bookcast over "
-               f"captured portraits, {CYAN}esc{RESET} aborts" )
+               f"captured portraits (or toggles heal loop), {CYAN}esc{RESET} aborts" )
 
     @property
     def party( self ):
@@ -79,7 +86,11 @@ class BookcastLoopPlugin( BookcastPlugin ):
              and src not in self._execute_passthrough
              and src in self._by_bind and self.remapper.window_ok() ):
             self._swallow_up.add( src )
-            self._run_loop( self._by_bind[ src ] )
+            cast = self._by_bind[ src ]
+            if cast.heal:
+                self._run_heal_loop( cast, src )
+            else:
+                self._run_loop( cast )
             return True
         return super()._on_key( device, stroke )
 
@@ -138,6 +149,11 @@ class BookcastLoopPlugin( BookcastPlugin ):
             return
 
         if not is_up:
+            if ( self._toggle_src is not None and src == self._toggle_src
+                 and self._ctrl and self._shift and not self._alt
+                 and src not in self._swallow_up ):
+                self._swallow_up.add( src )
+                self._abort = self._abort or "toggle"
             return
         if src in self._swallow_up:
             self._swallow_up.discard( src )
@@ -220,6 +236,58 @@ class BookcastLoopPlugin( BookcastPlugin ):
             self._sleep_checked( self.loop_poll_s )
         print( f"ℹ️ {GREEN}mm loop{RESET}: ready after "
                f"{MAGENTA}{( time.perf_counter() - t1 ) * 1000:.0f}{RESET} ms" )
+
+    def _wait_caster_ready( self, caster ):
+        """Wait if the caster's ready jewel is currently dark before starting a cast."""
+        if caster not in self.ready or not self._caster_busy( caster ):
+            return
+        t1 = time.perf_counter()
+        print( f"ℹ️ {GREEN}mm heal loop{RESET}: waiting for caster {CYAN}{caster}{RESET}..." )
+        while self._caster_busy( caster ):
+            if time.perf_counter() - t1 > self.loop_ready_s:
+                raise _LoopAbort( f"caster still busy after "
+                                  f"{self.loop_ready_s * 1000:.0f} ms" )
+            self._sleep_checked( self.loop_poll_s )
+        print( f"ℹ️ {GREEN}mm heal loop{RESET}: ready after "
+               f"{MAGENTA}{( time.perf_counter() - t1 ) * 1000:.0f}{RESET} ms" )
+
+    def _run_heal_loop( self, cast, src ):
+        name = cast.display_label()
+        print( f"🔁 {GREEN}mm heal loop{RESET}: {name} "
+               f"({CYAN}ctrl+shift-{cast.bind}{RESET} or {CYAN}esc{RESET} to stop)" )
+        self._release_held_mods()
+        self._executing = True
+        self._abort = None
+        self._toggle_src = src
+        self._ui_open = False
+        done = 0
+        try:
+            while True:
+                self._check()
+                if not self.remapper.window_ok():
+                    raise _LoopAbort( "game window not focused" )
+                self._wait_caster_ready( cast.caster )
+                if not self.remapper.window_ok():
+                    raise _LoopAbort( "game window not focused" )
+                xy = self._heal_target()
+                if xy is None:
+                    break
+                self._cast_on( cast, xy )
+                done += 1
+                self._wait_ready( cast.caster )
+            print( f"✅ {GREEN}mm heal loop: {name} complete "
+                   f"({MAGENTA}{done}{RESET}{GREEN} cast(s)){RESET}" )
+        except _LoopAbort as exc:
+            if self._ui_open:
+                self.remapper.tap_key( "esc" )
+                self._sleep_ms( "after_key" )
+            print( f"⏹️ {YELLOW}mm heal loop: {name} stopped after "
+                   f"{MAGENTA}{done}{RESET}{YELLOW} cast(s) ({exc}){RESET}" )
+        finally:
+            self._ui_open = False
+            self._toggle_src = None
+            self._abort = None
+            self._executing = False
 
     def _run_loop( self, cast ):
         name = cast.display_label()
